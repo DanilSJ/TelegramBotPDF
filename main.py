@@ -26,21 +26,15 @@ logger = logging.getLogger(__name__)
 os.makedirs("temp_files", exist_ok=True)
 os.makedirs("processed_files", exist_ok=True)
 
-timeout = aiohttp.ClientTimeout(
-    total=300,  # 5 минут
-    connect=30,
-    sock_connect=30,
-    sock_read=120
-)
 
-# Используем стандартную сессию с увеличенными таймаутами
-session = AiohttpSession(timeout=timeout)
+session = AiohttpSession()
 session.api = TelegramAPIServer.from_base("http://localhost:8081", is_local=True)
 
 
 # Инициализация бота и диспетчера
 bot = Bot(
     token=Config.BOT_TOKEN,
+    timeout=600,
     session=session,
 )
 storage = MemoryStorage()
