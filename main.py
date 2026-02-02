@@ -28,18 +28,20 @@ os.makedirs("processed_files", exist_ok=True)
 
 
 session = AiohttpSession(
-    timeout=aiohttp.ClientTimeout(total=600),
-    api=TelegramAPIServer.from_base("http://localhost:8081", is_local=True)
+    timeout=30.0,  # Таймаут для запросов в секундах
 )
 
 # Инициализация бота и диспетчера
 bot = Bot(
     token=Config.BOT_TOKEN,
     session=session,
+    parse_mode="HTML"
 )
-
 storage = MemoryStorage()
 dp = Dispatcher(storage=storage)
+
+# Устанавливаем таймаут для polling
+dp["polling_timeout"] = 10  # Таймаут polling в секундах
 
 # Инициализация процессора PDF
 pdf_processor = PDFProcessor()
