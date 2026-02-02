@@ -29,32 +29,6 @@ services:
       interval: 30s
       timeout: 10s
       retries: 3
-      start_period: 40s
-
-  bot:
-    build: ./bot
-    container_name: telegram-bot
-    restart: unless-stopped
-    depends_on:
-      telegram-bot-api:
-        condition: service_healthy
-    volumes:
-      - ./bot:/app
-      - ./downloads:/app/downloads
-      - ./logs/bot:/app/logs
-    environment:
-      - BOT_TOKEN=${BOT_TOKEN}
-      - ADMIN_ID=${ADMIN_ID}
-      - API_URL=http://telegram-bot-api:8081
-      - TZ=Europe/Moscow
-    env_file:
-      - .env
-    command: python main.py
-    logging:
-      driver: "json-file"
-      options:
-        max-size: "10m"
-        max-file: "3"
 
 volumes:
   telegram-api-data:
