@@ -40,7 +40,7 @@ storage = MemoryStorage()
 dp = Dispatcher(storage=storage)
 
 # Устанавливаем таймаут для polling
-dp["polling_timeout"] = 10  # Таймаут polling в секундах
+dp.config['timeout'] = 60
 
 # Инициализация процессора PDF
 pdf_processor = PDFProcessor()
