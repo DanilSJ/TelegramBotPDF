@@ -27,16 +27,18 @@ os.makedirs("temp_files", exist_ok=True)
 os.makedirs("processed_files", exist_ok=True)
 
 
-session = AiohttpSession()
-session.api = TelegramAPIServer.from_base("http://localhost:8081", is_local=True)
-
+session = AiohttpSession(
+    timeout=aiohttp.ClientTimeout(total=600),
+    api=TelegramAPIServer.from_base("http://localhost:8081", is_local=True)
+)
 
 # Инициализация бота и диспетчера
 bot = Bot(
     token=Config.BOT_TOKEN,
-    timeout=600,
     session=session,
+    parse_mode="HTML"
 )
+
 storage = MemoryStorage()
 dp = Dispatcher(storage=storage)
 
