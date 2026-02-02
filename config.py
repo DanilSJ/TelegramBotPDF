@@ -7,7 +7,7 @@ load_dotenv()
 class Config:
     # Токен бота из переменных окружения
     BOT_TOKEN = os.getenv("BOT_TOKEN")
-    API_URL = os.getenv("API_URL", "http://telegram-bot-api:8081")
+    API_URL = os.getenv("API_URL", "http://localhost:8081")
 
     # Настройки по умолчанию
     DEFAULT_DPI = 300
