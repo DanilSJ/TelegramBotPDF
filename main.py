@@ -26,29 +26,17 @@ logger = logging.getLogger(__name__)
 os.makedirs("temp_files", exist_ok=True)
 os.makedirs("processed_files", exist_ok=True)
 
-class CustomAiohttpSession(AiohttpSession):
-    def __init__(self):
-        # Устанавливаем таймауты напрямую в объект timeout
-        self.timeout = aiohttp.ClientTimeout(
-            total=600,  # общий таймаут 10 минут
-            connect=120,  # таймаут подключения 2 минуты
-            sock_connect=120,  # таймаут соединения 2 минуты
-            sock_read=300  # таймаут чтения 5 минут
-        )
-        super().__init__()
-    
-    @property
-    def timeout(self):
-        # Свойство для совместимости с aiogram
-        return self._timeout
-    
-    @timeout.setter
-    def timeout(self, value):
-        self._timeout = value
+timeout = aiohttp.ClientTimeout(
+    total=300,  # 5 минут
+    connect=30,
+    sock_connect=30,
+    sock_read=120
+)
 
-# Используем кастомную сессию
-session = CustomAiohttpSession()
+# Используем стандартную сессию с увеличенными таймаутами
+session = AiohttpSession(timeout=timeout)
 session.api = TelegramAPIServer.from_base("http://localhost:8081", is_local=True)
+
 
 # Инициализация бота и диспетчера
 bot = Bot(
