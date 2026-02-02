@@ -1,0 +1,5 @@
+aiogram==3.10.0
+pillow==10.2.0
+pymupdf==1.23.26
+img2pdf==0.4.4
+python-dotenv==1.0.0

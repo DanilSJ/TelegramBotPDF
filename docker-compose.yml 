@@ -1,0 +1,60 @@
+version: '3.8'
+
+services:
+  telegram-bot-api:
+    image: aiogram/telegram-bot-api:latest
+    container_name: telegram-bot-api
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:8081:8081"  # Только локальный доступ
+    environment:
+      TELEGRAM_LOCAL_MODE: "true"
+      TELEGRAM_LOG: "info"
+      TELEGRAM_STAT: "1"
+    command:
+      - "--local"
+      - "--http-port=8081"
+      - "--temp-dir=/tmp/telegram"
+      - "--log=/var/log/telegram/bot-api.log"
+      - "--verbosity=2"
+    volumes:
+      - telegram-api-data:/var/lib/telegram-bot-api
+      - ./logs/telegram:/var/log/telegram
+    ulimits:
+      nofile:
+        soft: 65535
+        hard: 65535
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:8081 || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+  bot:
+    build: ./bot
+    container_name: telegram-bot
+    restart: unless-stopped
+    depends_on:
+      telegram-bot-api:
+        condition: service_healthy
+    volumes:
+      - ./bot:/app
+      - ./downloads:/app/downloads
+      - ./logs/bot:/app/logs
+    environment:
+      - BOT_TOKEN=${BOT_TOKEN}
+      - ADMIN_ID=${ADMIN_ID}
+      - API_URL=http://telegram-bot-api:8081
+      - TZ=Europe/Moscow
+    env_file:
+      - .env
+    command: python main.py
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+volumes:
+  telegram-api-data:

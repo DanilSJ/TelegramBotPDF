@@ -1,0 +1,6 @@
+.venv/
+.idea/
+.env
+temp_files/
+processed_files/
+user_settings.json
