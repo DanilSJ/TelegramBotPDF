@@ -28,14 +28,23 @@ os.makedirs("processed_files", exist_ok=True)
 
 class CustomAiohttpSession(AiohttpSession):
     def __init__(self):
-        # Увеличиваем все таймауты
-        timeout = aiohttp.ClientTimeout(
+        # Устанавливаем таймауты напрямую в объект timeout
+        self.timeout = aiohttp.ClientTimeout(
             total=600,  # общий таймаут 10 минут
             connect=120,  # таймаут подключения 2 минуты
             sock_connect=120,  # таймаут соединения 2 минуты
             sock_read=300  # таймаут чтения 5 минут
         )
-        super().__init__(timeout=timeout)
+        super().__init__()
+    
+    @property
+    def timeout(self):
+        # Свойство для совместимости с aiogram
+        return self._timeout
+    
+    @timeout.setter
+    def timeout(self, value):
+        self._timeout = value
 
 # Используем кастомную сессию
 session = CustomAiohttpSession()
