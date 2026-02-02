@@ -36,7 +36,6 @@ session = AiohttpSession(
 bot = Bot(
     token=Config.BOT_TOKEN,
     session=session,
-    parse_mode="HTML"
 )
 
 storage = MemoryStorage()
