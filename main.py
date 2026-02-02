@@ -39,9 +39,6 @@ bot = Bot(
 storage = MemoryStorage()
 dp = Dispatcher(storage=storage)
 
-# Устанавливаем таймаут для polling
-dp.config['timeout'] = 60
-
 # Инициализация процессора PDF
 pdf_processor = PDFProcessor()
 
