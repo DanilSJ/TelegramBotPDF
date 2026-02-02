@@ -26,17 +26,7 @@ logger = logging.getLogger(__name__)
 os.makedirs("temp_files", exist_ok=True)
 os.makedirs("processed_files", exist_ok=True)
 
-session = AiohttpSession(
-    api=TelegramAPIServer.from_base(
-        Config.API_URL,
-        is_local=True
-    ),
-    timeout=aiohttp.ClientTimeout(
-        total=600,  # 10 минут для больших файлов
-        connect=10,  # 10 секунд на подключение
-        sock_read=300  # 5 минут на чтение
-    )
-)
+session = AiohttpSession(api=TelegramAPIServer.from_base("http://localhost:8081", is_local=True))
 
 # Инициализация бота и диспетчера
 bot = Bot(
