@@ -15,4 +15,4 @@ class Config:
     DEFAULT_BRIGHTNESS = 0
 
     # Максимальный размер файла (в байтах)
-    MAX_FILE_SIZE = 50 * 1024 * 1024  # 50 MB
+    MAX_FILE_SIZE = 200 * 1024 * 1024  # 50 MB
