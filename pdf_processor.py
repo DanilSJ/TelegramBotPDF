@@ -265,125 +265,31 @@ class PDFProcessor:
         except Exception as e:
             print(f"Error cleaning up temp files: {e}")
 
-    def create_archive_from_images(self, images_list, archive_number):
+    def create_archive_from_images(self, images_list):
         """
-        Создает ZIP архив из списка изображений
+        Создает ZIP архив из всех изображений
 
         Args:
             images_list: список кортежей (номер_страницы, путь_к_изображению)
-            archive_number: номер архива
 
         Returns:
             bytes: данные архива
         """
         zip_buffer = io.BytesIO()
 
-        with zipfile.ZipFile(zip_buffer, 'w', zipfile.ZIP_DEFLATED) as zip_file:
+        with zipfile.ZipFile(zip_buffer, 'w', zipfile.ZIP_DEFLATED, compresslevel=6) as zip_file:
             for page_num, image_path in images_list:
                 try:
+                    # Определяем расширение файла
+                    ext = os.path.splitext(image_path)[1].lower()
+                    filename = f"страница_{page_num}{ext}"
+
                     with open(image_path, 'rb') as img_file:
                         img_data = img_file.read()
-                        zip_file.writestr(f"страница_{page_num}.png", img_data)
+                        zip_file.writestr(filename, img_data)
                 except Exception as e:
                     print(f"Error adding image {image_path} to archive: {e}")
                     continue
 
         zip_buffer.seek(0)
         return zip_buffer.getvalue()
-
-    def split_images_for_archives(self, images, max_archive_size=40*1024*1024):
-        """
-        Разделяет изображения на группы для архивов
-        
-        Args:
-            images: список путей к изображениям
-            max_archive_size: максимальный размер одного архива в байтах
-            
-        Returns:
-            list: список списков с путями к изображениям для каждого архива
-        """
-        archives = []
-        current_archive = []
-        current_size = 0
-        
-        for i, img_path in enumerate(images, 1):
-            try:
-                img_size = os.path.getsize(img_path)
-                
-                # Если текущий архив не пуст и добавление изображения превысит лимит,
-                # начинаем новый архив
-                if current_archive and (current_size + img_size > max_archive_size):
-                    archives.append(list(current_archive))
-                    current_archive = []
-                    current_size = 0
-                
-                current_archive.append((i, img_path))
-                current_size += img_size
-                
-            except Exception as e:
-                print(f"Error processing image {img_path}: {e}")
-                continue
-        
-        # Добавляем последний архив
-        if current_archive:
-            archives.append(current_archive)
-        
-        return archives
-    
-    async def create_and_send_archives(self, images, original_name, bot, chat_id):
-        """
-        Создает и отправляет архивы, разделяя при необходимости
-        
-        Args:
-            images: список путей к изображениям
-            original_name: оригинальное имя файла
-            bot: экземпляр бота
-            chat_id: ID чата
-        """
-        MAX_ARCHIVE_SIZE = 40 * 1024 * 1024  # 40 MB
-        
-        # Разделяем изображения на архивы
-        archives_data = []
-        current_images = []
-        current_size = 0
-        
-        for i, img_path in enumerate(images, 1):
-            img_size = os.path.getsize(img_path)
-            
-            # Если добавление этого изображения превысит лимит и у нас уже есть изображения в архиве
-            if current_images and (current_size + img_size > MAX_ARCHIVE_SIZE):
-                # Создаем архив для текущей группы
-                archive_bytes = self.create_archive_from_images(current_images, len(archives_data) + 1)
-                archives_data.append(archive_bytes)
-                current_images = []
-                current_size = 0
-            
-            current_images.append((i, img_path))
-            current_size += img_size
-        
-        # Последний архив
-        if current_images:
-            archive_bytes = self.create_archive_from_images(current_images, len(archives_data) + 1)
-            archives_data.append(archive_bytes)
-        
-        # Отправляем архивы
-        total_archives = len(archives_data)
-        for idx, archive_bytes in enumerate(archives_data, 1):
-            if total_archives > 1:
-                filename = f"{Path(original_name).stem}_part_{idx}_of_{total_archives}.zip"
-                caption = f"📦 Часть {idx} из {total_archives}"
-            else:
-                filename = f"{Path(original_name).stem}_images.zip"
-                caption = f"📦 Все изображения ({len(images)} страниц)"
-            
-            await bot.send_document(
-                chat_id=chat_id,
-                document=BufferedInputFile(archive_bytes, filename=filename),
-                caption=caption
-            )
-            
-            # Пауза между отправками
-            if idx < total_archives:
-                await asyncio.sleep(0.5)
-        
-        return total_archives
