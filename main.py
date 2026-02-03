@@ -29,7 +29,7 @@ os.makedirs("processed_files", exist_ok=True)
 # Настройки сессии с увеличенными таймаутами
 session = AiohttpSession(
     api=TelegramAPIServer.from_base("http://localhost:8081", is_local=True),
-    connector=aiohttp.TCPConnector(limit=100, force_close=True),
+    connect=aiohttp.TCPConnector(limit=100, force_close=True),
 )
 
 # Инициализация бота с увеличенными таймаутами
