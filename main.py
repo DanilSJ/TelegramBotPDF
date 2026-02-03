@@ -229,7 +229,7 @@ async def handle_pdf(message: Message, state: FSMContext):
 
 @dp.callback_query(F.data == "action_images")
 async def process_images(callback: CallbackQuery, state: FSMContext):
-    """Обработка преобразования в изображения"""
+    """Обработка преобразования в изображения (БЕЗ контраста/яркости)"""
     await callback.answer()
 
     data = await state.get_data()
@@ -242,26 +242,23 @@ async def process_images(callback: CallbackQuery, state: FSMContext):
         # Создаем прогресс-сообщение
         progress_msg = await callback.message.edit_text("🔄 Преобразую PDF в изображения...")
 
-        # ИСПОЛЬЗУЕМ НОВУЮ ФУНКЦИЮ с применением настроек контраста/яркости
-        images = await pdf_processor.pdf_to_images_with_enhancement(
+        # Получаем настройки DPI пользователя
+        user_settings = pdf_processor.get_user_settings(callback.from_user.id)
+        dpi = user_settings.get('dpi', 300)
+
+        # Используем базовую функцию БЕЗ улучшений
+        images = await pdf_processor.pdf_to_images(
             input_pdf_path,
-            callback.from_user.id  # Передаем user_id для получения настроек
+            dpi=dpi  # Только DPI, без контраста/яркости
         )
 
         if not images:
             await progress_msg.edit_text("❌ Не удалось преобразовать PDF в изображения.")
             return
 
-        # Получаем текущие настройки для информационного сообщения
-        user_settings = pdf_processor.get_user_settings(callback.from_user.id)
-        contrast = user_settings.get('contrast', 1.15)
-        brightness = user_settings.get('brightness', 0)
-
         await progress_msg.edit_text(
             f"✅ Создано {len(images)} изображений\n"
-            f"🎨 Применены настройки:\n"
-            f"• Контраст: {contrast:.2f}\n"
-            f"• Яркость: {brightness}\n\n"
+            f"🎯 Качество: {dpi} DPI\n\n"
             f"📤 Отправляю...",
             parse_mode="HTML"
         )

@@ -417,6 +417,53 @@ class PDFProcessor:
 
         return Image.fromarray(img_array.astype(np.uint8))
 
+    # В классе PDFProcessor добавьте:
+
+    async def pdf_to_images_simple(self, pdf_path: str, dpi: int = 300) -> List[str]:
+        """Конвертация PDF в изображения ТОЛЬКО с настройкой DPI (без улучшений)"""
+        images = []
+        temp_dir = tempfile.mkdtemp()
+
+        try:
+            doc = fitz.open(pdf_path)
+
+            # Получаем имя файла для названия изображений
+            pdf_name = os.path.splitext(os.path.basename(pdf_path))[0]
+
+            for page_num in range(len(doc)):
+                page = doc.load_page(page_num)
+                zoom = dpi / 72
+
+                # Ограничиваем максимальный размер для Telegram
+                max_size = 10000
+                rect = page.rect
+                width = rect.width * zoom
+                height = rect.height * zoom
+
+                if width > max_size or height > max_size:
+                    scale_factor = max_size / max(width, height)
+                    zoom *= scale_factor
+
+                mat = fitz.Matrix(zoom, zoom)
+                pix = page.get_pixmap(matrix=mat)
+
+                # Используем имя PDF файла в названии изображения
+                img_path = os.path.join(temp_dir, f"{pdf_name}_page_{page_num + 1}.png")
+                pix.save(img_path)
+
+                # Оптимизируем размер для Telegram
+                self.optimize_image_size(img_path, max_file_size=1024 * 1024)
+
+                images.append(img_path)
+
+            doc.close()
+
+        except Exception as e:
+            logger.error(f"Error converting PDF to images: {e}")
+            raise
+
+        return images
+
     def auto_enhance_image(self, img: Image.Image) -> Image.Image:
         """Автоматическое улучшение изображения"""
         # Конвертируем в массив для анализа
