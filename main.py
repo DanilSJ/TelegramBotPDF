@@ -42,6 +42,7 @@ bot = Bot(
     token=Config.BOT_TOKEN,
     session=session,
 )
+bot.session.token = 60
 storage = MemoryStorage()
 dp = Dispatcher(storage=storage)
 
