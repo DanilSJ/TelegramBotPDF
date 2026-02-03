@@ -289,7 +289,7 @@ async def process_images(callback: CallbackQuery, state: FSMContext):
             await callback.message.answer("❌ Произошла ошибка при обработке файла. Попробуйте еще раз.")
 
 
-async def send_document_with_retry(message, file_bytes, filename, caption, max_retries=3):
+async def send_document_with_retry(message, file_bytes, filename, caption, max_retries=10):
     """Отправка документа с повторными попытками"""
     for attempt in range(max_retries):
         try:
@@ -302,9 +302,7 @@ async def send_document_with_retry(message, file_bytes, filename, caption, max_r
             )
             return True
         except Exception as e:
-            logger.error(f"Error sending document (attempt {attempt + 1}/{max_retries}): {e}")
-            if attempt < max_retries - 1:
-                await asyncio.sleep(2 ** attempt)  # Экспоненциальная задержка
+            logger.error(f"ОШИБКА {attempt + 1}/{max_retries}): {e}")
     return False
 
 
