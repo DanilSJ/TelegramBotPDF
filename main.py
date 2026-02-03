@@ -263,51 +263,22 @@ async def process_images(callback: CallbackQuery, state: FSMContext):
         # Разбиваем на части если файл больше 45MB (ограничение Telegram)
         CHUNK_SIZE = 400 * 1024 * 1024  # 45MB (оставляем запас)
 
-        if len(archive_bytes) <= CHUNK_SIZE:
-            # Если архив меньше 45MB, отправляем как есть
-            await progress_msg.edit_text(f"📤 Отправляю архив ({len(archive_bytes) / 1024 / 1024:.1f} MB)...")
 
-            # Используем отдельную задачу для отправки
-            asyncio.create_task(send_document_with_retry(
-                callback.message,
-                archive_bytes,
-                archive_name,
-                f"📁 Все изображения ({len(images)} страниц)"
-            ))
+        # Если архив меньше 45MB, отправляем как есть
+        await progress_msg.edit_text(f"📤 Отправляю архив ({len(archive_bytes) / 1024 / 1024:.1f} MB)...")
 
-            # Удаляем сообщение о прогрессе через 2 секунды
-            await asyncio.sleep(2)
-            await progress_msg.delete()
+        # Используем отдельную задачу для отправки
+        asyncio.create_task(send_document_with_retry(
+            callback.message,
+            archive_bytes,
+            archive_name,
+            f"📁 Все изображения ({len(images)} страниц)"
+        ))
 
-        else:
-            # Если архив больше 45MB, разбиваем на части
-            await progress_msg.edit_text(
-                f"📦 Архив слишком большой ({len(archive_bytes) / 1024 / 1024:.1f} MB), разбиваю на части...")
+        # Удаляем сообщение о прогрессе через 2 секунды
+        await asyncio.sleep(2)
+        await progress_msg.delete()
 
-            # Разбиваем на части
-            total_parts = (len(archive_bytes) + CHUNK_SIZE - 1) // CHUNK_SIZE
-
-            for i in range(0, len(archive_bytes), CHUNK_SIZE):
-                chunk = archive_bytes[i:i + CHUNK_SIZE]
-                part_num = i // CHUNK_SIZE + 1
-
-                chunk_filename = f"{Path(original_name).stem}_part_{part_num}_of_{total_parts}.zip"
-
-                # Отправляем часть
-                asyncio.create_task(send_document_with_retry(
-                    callback.message,
-                    chunk,
-                    chunk_filename,
-                    f"📁 Часть {part_num} из {total_parts} ({len(chunk) / 1024 / 1024:.1f} MB)"
-                ))
-
-                # Пауза между отправкой частей
-                await asyncio.sleep(1)
-
-            # Удаляем сообщение о прогрессе
-            await progress_msg.delete()
-
-        # Очищаем временные файлы
         await cleanup_images_and_temp(images, temp_dir)
 
     except Exception as e:
