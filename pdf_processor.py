@@ -464,6 +464,32 @@ class PDFProcessor:
 
         return images
 
+    # В класс PDFProcessor добавьте:
+
+    def validate_settings(self, user_id: int, dpi: int = None, contrast: float = None, brightness: int = None):
+        """Валидация настроек пользователя"""
+        errors = []
+
+        if dpi is not None:
+            if dpi < 72:
+                errors.append("DPI не может быть меньше 72")
+            elif dpi > 1200:
+                errors.append("DPI не может быть больше 1200")
+
+        if contrast is not None:
+            if contrast < 0.1:
+                errors.append("Контрастность не может быть меньше 0.1")
+            elif contrast > 10.0:
+                errors.append("Контрастность не может быть больше 10.0")
+
+        if brightness is not None:
+            if brightness < -100:
+                errors.append("Яркость не может быть меньше -100")
+            elif brightness > 100:
+                errors.append("Яркость не может быть больше 100")
+
+        return errors
+
     def auto_enhance_image(self, img: Image.Image) -> Image.Image:
         """Автоматическое улучшение изображения"""
         # Конвертируем в массив для анализа

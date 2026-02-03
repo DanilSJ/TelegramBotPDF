@@ -49,6 +49,10 @@ class UserStates(StatesGroup):
     waiting_for_contrast_settings = State()
     waiting_for_quality_settings = State()
     waiting_for_brightness_settings = State()
+    # Добавьте новые состояния:
+    waiting_for_custom_dpi = State()
+    waiting_for_custom_contrast = State()
+    waiting_for_custom_brightness = State()
 
 
 # Клавиатуры
@@ -62,6 +66,11 @@ def get_main_keyboard():
     builder.adjust(1)
     return builder.as_markup()
 
+def get_back_to_quality_keyboard():
+    """Клавиатура для возврата к выбору качества"""
+    builder = InlineKeyboardBuilder()
+    builder.button(text="⬅️ Назад к качеству", callback_data="back_to_quality")
+    return builder.as_markup()
 
 def get_settings_keyboard():
     """Клавиатура настроек"""
@@ -108,10 +117,10 @@ def get_quality_keyboard():
     builder.button(text="Высокое (300 DPI)", callback_data="quality_high")
     builder.button(text="Среднее (150 DPI)", callback_data="quality_medium")
     builder.button(text="Низкое (72 DPI)", callback_data="quality_low")
+    builder.button(text="✏️ Ввести своё значение", callback_data="quality_custom")
     builder.button(text="⬅️ Назад", callback_data="back_to_settings")
     builder.adjust(1)
     return builder.as_markup()
-
 
 def get_contrast_keyboard():
     """Клавиатура выбора контраста"""
@@ -120,11 +129,10 @@ def get_contrast_keyboard():
     builder.button(text="Высокий (+30%)", callback_data="contrast_high")
     builder.button(text="Средний (+15%)", callback_data="contrast_medium")
     builder.button(text="Низкий (+5%)", callback_data="contrast_low")
-    builder.button(text="Пользовательский", callback_data="contrast_custom")
+    builder.button(text="✏️ Ввести своё значение", callback_data="contrast_custom")
     builder.button(text="⬅️ Назад", callback_data="back_to_settings")
     builder.adjust(1)
     return builder.as_markup()
-
 
 def get_brightness_keyboard():
     """Клавиатура выбора яркости"""
@@ -132,11 +140,10 @@ def get_brightness_keyboard():
     builder.button(text="Максимальная (+100)", callback_data="brightness_max")
     builder.button(text="Увеличить (+20)", callback_data="brightness_plus")
     builder.button(text="Уменьшить (-20)", callback_data="brightness_minus")
-    builder.button(text="Пользовательская", callback_data="brightness_custom")
+    builder.button(text="✏️ Ввести своё значение", callback_data="brightness_custom")
     builder.button(text="⬅️ Назад", callback_data="back_to_settings")
     builder.adjust(1)
     return builder.as_markup()
-
 
 def get_contrast_apply_keyboard():
     """Клавиатура для применения контраста"""
@@ -631,7 +638,7 @@ async def process_setting_select(callback: CallbackQuery):
 
 
 @dp.callback_query(F.data.startswith("quality_"))
-async def process_quality_setting(callback: CallbackQuery):
+async def process_quality_setting(callback: CallbackQuery, state: FSMContext):
     """Обработка выбора качества"""
     await callback.answer()
 
@@ -643,6 +650,19 @@ async def process_quality_setting(callback: CallbackQuery):
         dpi = 150
     elif quality == "low":
         dpi = 72
+    elif quality == "custom":
+        await callback.message.edit_text(
+            "✏️ Введите значение DPI (от 72 до 1200):\n"
+            "Например: 400\n\n"
+            "💡 Рекомендации:\n"
+            "• 72-150 DPI - для быстрого просмотра\n"
+            "• 150-300 DPI - для обычной печати\n"
+            "• 300-600 DPI - для высокого качества\n"
+            "• 600-1200 DPI - для профессиональной печати",
+            reply_markup=get_back_to_quality_keyboard()
+        )
+        await state.set_state(UserStates.waiting_for_custom_dpi)
+        return
     else:
         await callback.answer("❌ Неизвестный параметр качества")
         return
@@ -653,7 +673,6 @@ async def process_quality_setting(callback: CallbackQuery):
         reply_markup=get_back_to_settings_keyboard()
     )
 
-
 @dp.callback_query(F.data.startswith("contrast_"))
 async def process_contrast_setting(callback: CallbackQuery, state: FSMContext):
     """Обработка выбора контраста"""
@@ -662,7 +681,7 @@ async def process_contrast_setting(callback: CallbackQuery, state: FSMContext):
     contrast_level = callback.data.split("_")[1]
 
     if contrast_level == "max":
-        contrast = 10.0  # Максимальное значение
+        contrast = 10.0
     elif contrast_level == "high":
         contrast = 1.3
     elif contrast_level == "medium":
@@ -671,11 +690,17 @@ async def process_contrast_setting(callback: CallbackQuery, state: FSMContext):
         contrast = 1.05
     elif contrast_level == "custom":
         await callback.message.edit_text(
-            "✏️ Введите значение контраста (от 0.5 до 10.0):\n"
-            "Например: 1.25",
+            "✏️ Введите значение контрастности (от 0.1 до 10.0):\n"
+            "Например: 1.25\n\n"
+            "💡 Рекомендации:\n"
+            "• 0.5-1.0 - уменьшение контраста\n"
+            "• 1.0 - без изменений\n"
+            "• 1.1-1.5 - легкое улучшение\n"
+            "• 1.5-2.5 - сильное улучшение\n"
+            "• 2.5-10.0 - экстремальный контраст",
             reply_markup=get_back_to_contrast_keyboard()
         )
-        await state.set_state(UserStates.waiting_for_contrast_settings)
+        await state.set_state(UserStates.waiting_for_custom_contrast)
         return
     else:
         await callback.answer("❌ Неизвестный параметр контраста")
@@ -683,7 +708,7 @@ async def process_contrast_setting(callback: CallbackQuery, state: FSMContext):
 
     pdf_processor.update_user_settings(callback.from_user.id, {'contrast': contrast})
     await callback.message.edit_text(
-        f"✅ Контраст установлен: {contrast:.2f}",
+        f"✅ Контрастность установлена: {contrast:.2f}",
         reply_markup=get_back_to_settings_keyboard()
     )
 
@@ -695,7 +720,7 @@ async def process_brightness_setting(callback: CallbackQuery, state: FSMContext)
     brightness_level = callback.data.split("_")[1]
 
     if brightness_level == "max":
-        brightness = 100  # Максимальное значение
+        brightness = 100
     elif brightness_level == "plus":
         brightness = 20
     elif brightness_level == "minus":
@@ -703,10 +728,16 @@ async def process_brightness_setting(callback: CallbackQuery, state: FSMContext)
     elif brightness_level == "custom":
         await callback.message.edit_text(
             "✏️ Введите значение яркости (от -100 до 100):\n"
-            "Например: 15",
+            "Например: 15\n\n"
+            "💡 Рекомендации:\n"
+            "• -100 до -50 - сильное затемнение\n"
+            "• -50 до -10 - легкое затемнение\n"
+            "• -10 до 10 - почти без изменений\n"
+            "• 10 до 50 - легкое осветление\n"
+            "• 50 до 100 - сильное осветление",
             reply_markup=get_back_to_brightness_keyboard()
         )
-        await state.set_state(UserStates.waiting_for_brightness_settings)
+        await state.set_state(UserStates.waiting_for_custom_brightness)
         return
     else:
         await callback.answer("❌ Неизвестный параметр яркости")
@@ -717,6 +748,123 @@ async def process_brightness_setting(callback: CallbackQuery, state: FSMContext)
         f"✅ Яркость установлена: {brightness}",
         reply_markup=get_back_to_settings_keyboard()
     )
+
+
+@dp.message(UserStates.waiting_for_custom_dpi)
+async def process_custom_dpi(message: Message, state: FSMContext):
+    """Обработка пользовательского значения DPI"""
+    try:
+        dpi = int(message.text)
+
+        # Проверяем валидность
+        errors = pdf_processor.validate_settings(
+            message.from_user.id,
+            dpi=dpi
+        )
+
+        if errors:
+            await message.answer(f"❌ {errors[0]}\nПожалуйста, введите значение от 72 до 1200:")
+        else:
+            pdf_processor.update_user_settings(message.from_user.id, {'dpi': dpi})
+            await message.answer(
+                f"✅ DPI установлен: {dpi}\n\n"
+                f"💡 Это {dpi / 300:.1f}x от стандартного качества (300 DPI)",
+                reply_markup=get_back_to_settings_keyboard()
+            )
+            await state.clear()
+
+    except ValueError:
+        await message.answer("❌ Пожалуйста, введите целое число. Например: 400")
+
+
+@dp.message(UserStates.waiting_for_custom_contrast)
+async def process_custom_contrast(message: Message, state: FSMContext):
+    """Обработка пользовательского значения контрастности"""
+    try:
+        contrast = float(message.text)
+
+        # Проверяем валидность
+        errors = pdf_processor.validate_settings(
+            message.from_user.id,
+            contrast=contrast
+        )
+
+        if errors:
+            await message.answer(f"❌ {errors[0]}\nПожалуйста, введите значение от 0.1 до 10.0:")
+        else:
+            pdf_processor.update_user_settings(message.from_user.id, {'contrast': contrast})
+
+            # Добавляем описание уровня контраста
+            if contrast <= 0.5:
+                level = "очень низкий"
+            elif contrast <= 0.8:
+                level = "низкий"
+            elif contrast <= 1.0:
+                level = "немного ниже стандартного"
+            elif contrast <= 1.1:
+                level = "стандартный"
+            elif contrast <= 1.5:
+                level = "умеренный"
+            elif contrast <= 2.0:
+                level = "высокий"
+            elif contrast <= 3.0:
+                level = "очень высокий"
+            else:
+                level = "экстремальный"
+
+            await message.answer(
+                f"✅ Контрастность установлена: {contrast:.2f}\n"
+                f"📊 Уровень: {level}",
+                reply_markup=get_back_to_settings_keyboard()
+            )
+            await state.clear()
+
+    except ValueError:
+        await message.answer("❌ Пожалуйста, введите число. Например: 1.25")
+
+
+@dp.message(UserStates.waiting_for_custom_brightness)
+async def process_custom_brightness(message: Message, state: FSMContext):
+    """Обработка пользовательского значения яркости"""
+    try:
+        brightness = int(message.text)
+
+        # Проверяем валидность
+        errors = pdf_processor.validate_settings(
+            message.from_user.id,
+            brightness=brightness
+        )
+
+        if errors:
+            await message.answer(f"❌ {errors[0]}\nПожалуйста, введите значение от -100 до 100:")
+        else:
+            pdf_processor.update_user_settings(message.from_user.id, {'brightness': brightness})
+
+            # Добавляем описание уровня яркости
+            if brightness <= -50:
+                level = "очень тёмный"
+            elif brightness <= -20:
+                level = "тёмный"
+            elif brightness <= -10:
+                level = "немного темнее"
+            elif brightness <= 10:
+                level = "стандартный"
+            elif brightness <= 30:
+                level = "немного светлее"
+            elif brightness <= 60:
+                level = "светлый"
+            else:
+                level = "очень светлый"
+
+            await message.answer(
+                f"✅ Яркость установлена: {brightness}\n"
+                f"💡 Уровень: {level}",
+                reply_markup=get_back_to_settings_keyboard()
+            )
+            await state.clear()
+
+    except ValueError:
+        await message.answer("❌ Пожалуйста, введите целое число. Например: 15")
 
 @dp.callback_query(F.data.startswith("back_to_"))
 async def process_back(callback: CallbackQuery, state: FSMContext):
@@ -756,7 +904,11 @@ async def process_back(callback: CallbackQuery, state: FSMContext):
             "☀️ Выберите уровень яркости:",
             reply_markup=get_brightness_keyboard()
         )
-
+    elif back_to == "quality":  # Добавьте этот случай
+        await callback.message.edit_text(
+            "🎯 Выберите качество для преобразования PDF в изображения:",
+            reply_markup=get_quality_keyboard()
+        )
 
 # Обработчики текстовых сообщений для кастомных настроек
 @dp.message(UserStates.waiting_for_contrast_settings)
