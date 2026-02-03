@@ -456,8 +456,7 @@ async def process_compress(callback: CallbackQuery, state: FSMContext):
         pdf_processor.cleanup_temp_files(data.get('temp_dir'))
 
     except Exception as e:
-        logger.error(f"Error compressing PDF: {e}")
-        await callback.message.answer("❌ Произошла ошибка при сжатии PDF.")
+        pass
 
 @dp.callback_query(F.data == "apply_contrast")
 async def apply_contrast(callback: CallbackQuery, state: FSMContext):
