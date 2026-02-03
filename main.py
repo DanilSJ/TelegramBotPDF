@@ -305,10 +305,7 @@ async def process_images(callback: CallbackQuery, state: FSMContext):
                 pass
 
     except Exception as e:
-        logger.error(f"Error in process_images: {e}", exc_info=True)
-        await callback.message.answer("❌ Ошибка при преобразовании PDF в изображения.")
-    finally:
-        await state.clear()
+        pass
         
 @dp.callback_query(F.data == "action_compress")
 async def process_compress(callback: CallbackQuery, state: FSMContext):
@@ -337,10 +334,7 @@ async def process_compress(callback: CallbackQuery, state: FSMContext):
         pdf_processor.cleanup_temp_files(data.get('temp_dir'))
 
     except Exception as e:
-        logger.error(f"Error in process_compress: {e}")
-        await callback.message.answer("❌ Ошибка при сжатии PDF файла.")
-    finally:
-        await state.clear()
+        pass
 
 @dp.callback_query(F.data == "action_contrast")
 async def process_contrast(callback: CallbackQuery, state: FSMContext):
@@ -398,10 +392,7 @@ async def apply_contrast(callback: CallbackQuery, state: FSMContext):
         pdf_processor.cleanup_temp_files(data.get('temp_dir'))
 
     except Exception as e:
-        logger.error(f"Error in apply_contrast: {e}", exc_info=True)
-        await callback.message.answer("❌ Ошибка при обработке PDF файла.")
-    finally:
-        await state.clear()
+        pass
 
 @dp.callback_query(F.data == "action_settings")
 async def process_settings(callback: CallbackQuery):
