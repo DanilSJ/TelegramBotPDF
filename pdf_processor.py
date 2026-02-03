@@ -803,7 +803,7 @@ class PDFProcessor:
 
         # Ограничиваем значения
         if 'contrast' in updates:
-            updates['contrast'] = max(0.5, min(3.0, float(updates['contrast'])))
+            updates['contrast'] = max(0.5, min(10.0, float(updates['contrast'])))  # Изменил с 3.0 на 10.0
         if 'brightness' in updates:
             updates['brightness'] = max(-100, min(100, int(updates['brightness'])))
         if 'dpi' in updates:

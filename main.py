@@ -24,14 +24,14 @@ os.makedirs("temp_files", exist_ok=True)
 os.makedirs("processed_files", exist_ok=True)
 
 # Настройки сессии с увеличенными таймаутами
-session = AiohttpSession(
-    api=TelegramAPIServer.from_base("http://localhost:8081", is_local=True),
-)
+# session = AiohttpSession(
+#     api=TelegramAPIServer.from_base("http://localhost:8081", is_local=True),
+# )
 
 # Инициализация бота с увеличенными таймаутами
 bot = Bot(
     token=Config.BOT_TOKEN,
-    session=session,
+    # session=session,
     timeout=1800,  # Увеличили до 30 минут
 )
 
@@ -116,6 +116,7 @@ def get_quality_keyboard():
 def get_contrast_keyboard():
     """Клавиатура выбора контраста"""
     builder = InlineKeyboardBuilder()
+    builder.button(text="Максимальный (10.0)", callback_data="contrast_max")
     builder.button(text="Высокий (+30%)", callback_data="contrast_high")
     builder.button(text="Средний (+15%)", callback_data="contrast_medium")
     builder.button(text="Низкий (+5%)", callback_data="contrast_low")
@@ -128,6 +129,7 @@ def get_contrast_keyboard():
 def get_brightness_keyboard():
     """Клавиатура выбора яркости"""
     builder = InlineKeyboardBuilder()
+    builder.button(text="Максимальная (+100)", callback_data="brightness_max")
     builder.button(text="Увеличить (+20)", callback_data="brightness_plus")
     builder.button(text="Уменьшить (-20)", callback_data="brightness_minus")
     builder.button(text="Пользовательская", callback_data="brightness_custom")
@@ -649,7 +651,9 @@ async def process_contrast_setting(callback: CallbackQuery, state: FSMContext):
 
     contrast_level = callback.data.split("_")[1]
 
-    if contrast_level == "high":
+    if contrast_level == "max":
+        contrast = 10.0  # Максимальное значение
+    elif contrast_level == "high":
         contrast = 1.3
     elif contrast_level == "medium":
         contrast = 1.15
@@ -657,7 +661,7 @@ async def process_contrast_setting(callback: CallbackQuery, state: FSMContext):
         contrast = 1.05
     elif contrast_level == "custom":
         await callback.message.edit_text(
-            "✏️ Введите значение контраста (от 0.5 до 2.0):\n"
+            "✏️ Введите значение контраста (от 0.5 до 10.0):\n"
             "Например: 1.25",
             reply_markup=get_back_to_contrast_keyboard()
         )
@@ -673,7 +677,6 @@ async def process_contrast_setting(callback: CallbackQuery, state: FSMContext):
         reply_markup=get_back_to_settings_keyboard()
     )
 
-
 @dp.callback_query(F.data.startswith("brightness_"))
 async def process_brightness_setting(callback: CallbackQuery, state: FSMContext):
     """Обработка выбора яркости"""
@@ -681,7 +684,9 @@ async def process_brightness_setting(callback: CallbackQuery, state: FSMContext)
 
     brightness_level = callback.data.split("_")[1]
 
-    if brightness_level == "plus":
+    if brightness_level == "max":
+        brightness = 100  # Максимальное значение
+    elif brightness_level == "plus":
         brightness = 20
     elif brightness_level == "minus":
         brightness = -20
@@ -702,7 +707,6 @@ async def process_brightness_setting(callback: CallbackQuery, state: FSMContext)
         f"✅ Яркость установлена: {brightness}",
         reply_markup=get_back_to_settings_keyboard()
     )
-
 
 @dp.callback_query(F.data.startswith("back_to_"))
 async def process_back(callback: CallbackQuery, state: FSMContext):
@@ -750,7 +754,7 @@ async def process_custom_contrast(message: Message, state: FSMContext):
     """Обработка пользовательского значения контраста"""
     try:
         contrast = float(message.text)
-        if 0.5 <= contrast <= 2.0:
+        if 0.5 <= contrast <= 10.0:  # Изменил верхнюю границу с 2.0 на 10.0
             pdf_processor.update_user_settings(message.from_user.id, {'contrast': contrast})
             await message.answer(
                 f"✅ Контраст установлен: {contrast:.2f}",
@@ -758,10 +762,9 @@ async def process_custom_contrast(message: Message, state: FSMContext):
             )
             await state.clear()
         else:
-            await message.answer("❌ Значение должно быть от 0.5 до 2.0. Попробуйте еще раз:")
+            await message.answer("❌ Значение должно быть от 0.5 до 10.0. Попробуйте еще раз:")
     except ValueError:
         await message.answer("❌ Пожалуйста, введите число. Например: 1.25")
-
 
 @dp.message(UserStates.waiting_for_brightness_settings)
 async def process_custom_brightness(message: Message, state: FSMContext):
