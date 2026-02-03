@@ -261,7 +261,7 @@ async def process_images(callback: CallbackQuery, state: FSMContext):
         archive_name = f"{Path(original_name).stem}_images.zip"
 
         # Разбиваем на части если файл больше 45MB (ограничение Telegram)
-        CHUNK_SIZE = 45 * 1024 * 1024  # 45MB (оставляем запас)
+        CHUNK_SIZE = 400 * 1024 * 1024  # 45MB (оставляем запас)
 
         if len(archive_bytes) <= CHUNK_SIZE:
             # Если архив меньше 45MB, отправляем как есть
