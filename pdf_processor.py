@@ -99,12 +99,12 @@ class PDFProcessor:
             return False
 
     async def _compress_with_ghostscript(self, pdf_path: str, output_path: str, settings: dict) -> str:
-        """Сжатие через Ghostscript с расширенными параметрами"""
+        """Сжатие через Ghostscript с БЕЗОПАСНЫМИ параметрами"""
         gs_settings = settings["gs_settings"]
         image_quality = settings["image_quality"]
         image_dpi = settings["image_dpi"]
 
-        # Команда Ghostscript с оптимизацией изображений
+        # БАЗОВАЯ команда Ghostscript - БЕЗ опасных преобразований цвета
         command = [
             'gs',
             '-sDEVICE=pdfwrite',
@@ -114,26 +114,23 @@ class PDFProcessor:
             '-dQUIET',
             '-dBATCH',
 
-            # Оптимизация изображений
+            # БЕЗОПАСНЫЕ настройки для изображений
             '-dDownsampleColorImages=true',
             f'-dColorImageResolution={image_dpi}',
-            f'-dColorImageDownsampleThreshold=1.0',
-            f'-dColorImageDownsampleType=/Bicubic',
+            '-dColorImageDownsampleType=/Bicubic',
 
             '-dDownsampleGrayImages=true',
             f'-dGrayImageResolution={image_dpi}',
-            f'-dGrayImageDownsampleThreshold=1.0',
-            f'-dGrayImageDownsampleType=/Bicubic',
+            '-dGrayImageDownsampleType=/Bicubic',
 
             '-dDownsampleMonoImages=true',
             f'-dMonoImageResolution={image_dpi}',
-            f'-dMonoImageDownsampleThreshold=1.0',
-            f'-dMonoImageDownsampleType=/Subsample',
+            '-dMonoImageDownsampleType=/Subsample',
 
             # Качество JPEG
             f'-dColorImageFilter=/DCTEncode',
             f'-dGrayImageFilter=/DCTEncode',
-            f'-dColorConversionStrategy=/sRGB',
+            f'-dColorConversionStrategy=/LeaveColorUnchanged',  # ВАЖНО: не менять цвета
             f'-dEncodeColorImages=true',
             f'-dEncodeGrayImages=true',
             f'-dEncodeMonoImages=true',
@@ -146,21 +143,21 @@ class PDFProcessor:
             '-dSubsetFonts=true',
             '-dCompressPages=true',
             '-dUseFlateCompression=true',
-            f'-dFlateEncodeFilter=/FlateEncode',
 
-            # Качество JPEG (для настроек)
+            # Качество JPEG
             f'-dColorImageQuality={image_quality}',
             f'-dGrayImageQuality={image_quality}',
+
+            # ВАЖНО: отключаем преобразование в градации серого
+            '-dProcessColorModel=/DeviceRGB',
 
             f'-sOutputFile={output_path}',
             pdf_path
         ]
 
-        # Для экстремального сжатия добавляем дополнительные параметры
-        if settings.get("extreme", False):
-            command.insert(5, '-dColorConversionStrategy=/Gray')
-            command.insert(6, '-dProcessColorModel=/DeviceGray')
-            command.insert(7, '-dColorImageDepth=4')
+        # УДАЛЕНО: экстремальные параметры
+        # НЕ добавляем параметры для экстремального сжатия
+        # которые могут конвертировать в черно-белое
 
         process = await asyncio.create_subprocess_exec(
             *command,
