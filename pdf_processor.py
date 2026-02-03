@@ -1,11 +1,16 @@
+import io
 import os
 import asyncio
 import tempfile
+import zipfile
+from pathlib import Path
 from typing import List, Dict
 import fitz
 from PIL import Image, ImageEnhance
 import img2pdf
 import json
+
+from aiogram.types import BufferedInputFile
 
 
 class PDFProcessor:
@@ -260,19 +265,19 @@ class PDFProcessor:
         except Exception as e:
             print(f"Error cleaning up temp files: {e}")
 
-     def create_archive_from_images(self, images_list, archive_number):
+    def create_archive_from_images(self, images_list, archive_number):
         """
         Создает ZIP архив из списка изображений
-        
+
         Args:
             images_list: список кортежей (номер_страницы, путь_к_изображению)
             archive_number: номер архива
-            
+
         Returns:
             bytes: данные архива
         """
         zip_buffer = io.BytesIO()
-        
+
         with zipfile.ZipFile(zip_buffer, 'w', zipfile.ZIP_DEFLATED) as zip_file:
             for page_num, image_path in images_list:
                 try:
@@ -282,10 +287,10 @@ class PDFProcessor:
                 except Exception as e:
                     print(f"Error adding image {image_path} to archive: {e}")
                     continue
-        
+
         zip_buffer.seek(0)
         return zip_buffer.getvalue()
-    
+
     def split_images_for_archives(self, images, max_archive_size=40*1024*1024):
         """
         Разделяет изображения на группы для архивов
@@ -373,7 +378,7 @@ class PDFProcessor:
             
             await bot.send_document(
                 chat_id=chat_id,
-                document=types.BufferedInputFile(archive_bytes, filename=filename),
+                document=BufferedInputFile(archive_bytes, filename=filename),
                 caption=caption
             )
             
