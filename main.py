@@ -26,16 +26,16 @@ logger = logging.getLogger(__name__)
 os.makedirs("temp_files", exist_ok=True)
 os.makedirs("processed_files", exist_ok=True)
 
-
+# Настройки сессии с увеличенными таймаутами
 session = AiohttpSession(
     api=TelegramAPIServer.from_base("http://localhost:8081", is_local=True),
 )
 
-# Инициализация бота и диспетчера
+# Инициализация бота с увеличенными таймаутами
 bot = Bot(
     token=Config.BOT_TOKEN,
     session=session,
-    timeout=0,
+    timeout=1800,  # Увеличили до 30 минут
 )
 
 storage = MemoryStorage()
@@ -44,6 +44,7 @@ dp = Dispatcher(storage=storage)
 # Инициализация процессора PDF
 pdf_processor = PDFProcessor()
 
+
 # Состояния для FSM
 class UserStates(StatesGroup):
     waiting_for_pdf = State()
@@ -51,6 +52,7 @@ class UserStates(StatesGroup):
     waiting_for_contrast_settings = State()
     waiting_for_quality_settings = State()
     waiting_for_brightness_settings = State()
+
 
 # Клавиатуры
 def get_main_keyboard():
@@ -63,6 +65,7 @@ def get_main_keyboard():
     builder.adjust(1)
     return builder.as_markup()
 
+
 def get_settings_keyboard():
     """Клавиатура настроек"""
     builder = InlineKeyboardBuilder()
@@ -73,11 +76,13 @@ def get_settings_keyboard():
     builder.adjust(1)
     return builder.as_markup()
 
+
 def get_back_to_settings_keyboard():
     """Клавиатура для возврата в настройки"""
     builder = InlineKeyboardBuilder()
     builder.button(text="⬅️ Назад к настройкам", callback_data="back_to_settings")
     return builder.as_markup()
+
 
 def get_back_to_contrast_keyboard():
     """Клавиатура для возврата к выбору контраста"""
@@ -85,17 +90,20 @@ def get_back_to_contrast_keyboard():
     builder.button(text="⬅️ Назад к контрасту", callback_data="back_to_contrast")
     return builder.as_markup()
 
+
 def get_back_to_brightness_keyboard():
     """Клавиатура для возврата к выбору яркости"""
     builder = InlineKeyboardBuilder()
     builder.button(text="⬅️ Назад к яркости", callback_data="back_to_brightness")
     return builder.as_markup()
 
+
 def get_back_to_main_keyboard():
     """Клавиатура для возврата в главное меню"""
     builder = InlineKeyboardBuilder()
     builder.button(text="⬅️ Назад в главное меню", callback_data="back_to_main")
     return builder.as_markup()
+
 
 def get_quality_keyboard():
     """Клавиатура выбора качества"""
@@ -106,6 +114,7 @@ def get_quality_keyboard():
     builder.button(text="⬅️ Назад", callback_data="back_to_settings")
     builder.adjust(1)
     return builder.as_markup()
+
 
 def get_contrast_keyboard():
     """Клавиатура выбора контраста"""
@@ -118,6 +127,7 @@ def get_contrast_keyboard():
     builder.adjust(1)
     return builder.as_markup()
 
+
 def get_brightness_keyboard():
     """Клавиатура выбора яркости"""
     builder = InlineKeyboardBuilder()
@@ -128,6 +138,7 @@ def get_brightness_keyboard():
     builder.adjust(1)
     return builder.as_markup()
 
+
 def get_contrast_apply_keyboard():
     """Клавиатура для применения контраста"""
     builder = InlineKeyboardBuilder()
@@ -136,6 +147,7 @@ def get_contrast_apply_keyboard():
     builder.button(text="⬅️ Назад", callback_data="back_to_main")
     builder.adjust(1)
     return builder.as_markup()
+
 
 # Обработчики команд
 @dp.message(Command("start"))
@@ -151,6 +163,7 @@ async def cmd_start(message: Message, state: FSMContext):
         "⚙️ Также вы можете настроить параметры обработки в меню настроек.",
         parse_mode="HTML"
     )
+
 
 @dp.message(Command("help"))
 async def cmd_help(message: Message):
@@ -168,6 +181,7 @@ async def cmd_help(message: Message):
         "💡 <b>Совет:</b> Для сканированных документов используйте функцию настройки контраста и яркости для улучшения читаемости.",
         parse_mode="HTML"
     )
+
 
 @dp.message(F.document)
 async def handle_pdf(message: Message, state: FSMContext):
@@ -209,7 +223,7 @@ async def handle_pdf(message: Message, state: FSMContext):
         logger.error(f"Error processing PDF: {e}")
         await message.answer("❌ Произошла ошибка при обработке файла. Попробуйте еще раз.")
 
-# Обработчики callback-ов
+
 @dp.callback_query(F.data == "action_images")
 async def process_images(callback: CallbackQuery, state: FSMContext):
     """Обработка преобразования в изображения"""
@@ -221,7 +235,8 @@ async def process_images(callback: CallbackQuery, state: FSMContext):
     temp_dir = data.get('temp_dir')
 
     try:
-        await callback.message.edit_text("🔄 Преобразую PDF в изображения...")
+        # Создаем прогресс-сообщение
+        progress_msg = await callback.message.edit_text("🔄 Преобразую PDF в изображения...")
 
         # Получаем настройки качества
         user_settings = pdf_processor.get_user_settings(callback.from_user.id)
@@ -231,10 +246,10 @@ async def process_images(callback: CallbackQuery, state: FSMContext):
         images = await pdf_processor.pdf_to_images(input_pdf_path, dpi=dpi)
 
         if not images:
-            await callback.message.edit_text("❌ Не удалось преобразовать PDF в изображения.")
+            await progress_msg.edit_text("❌ Не удалось преобразовать PDF в изображения.")
             return
 
-        await callback.message.edit_text(f"✅ Создано {len(images)} изображений\n📦 Подготавливаю архив...")
+        await progress_msg.edit_text(f"✅ Создано {len(images)} изображений\n📦 Подготавливаю архив...")
 
         # Создаем список всех изображений для архива
         images_list = [(i, img_path) for i, img_path in enumerate(images, 1)]
@@ -245,57 +260,113 @@ async def process_images(callback: CallbackQuery, state: FSMContext):
         # Отправляем один архив
         archive_name = f"{Path(original_name).stem}_images.zip"
 
-        # Разбиваем на части если файл больше 50MB (ограничение Telegram)
-        CHUNK_SIZE = 400 * 1024 * 1024  # 50MB
+        # Разбиваем на части если файл больше 45MB (ограничение Telegram)
+        CHUNK_SIZE = 45 * 1024 * 1024  # 45MB (оставляем запас)
 
         if len(archive_bytes) <= CHUNK_SIZE:
-            # Если архив меньше 50MB, отправляем как есть
-            await callback.message.answer_document(
-                types.BufferedInputFile(
-                    archive_bytes,
-                    filename=archive_name
-                ),
-                caption=f"📁 Все изображения ({len(images)} страниц)"
-            )
+            # Если архив меньше 45MB, отправляем как есть
+            await progress_msg.edit_text(f"📤 Отправляю архив ({len(archive_bytes) / 1024 / 1024:.1f} MB)...")
+
+            # Используем отдельную задачу для отправки
+            asyncio.create_task(send_document_with_retry(
+                callback.message,
+                archive_bytes,
+                archive_name,
+                f"📁 Все изображения ({len(images)} страниц)"
+            ))
+
+            # Удаляем сообщение о прогрессе через 2 секунды
+            await asyncio.sleep(2)
+            await progress_msg.delete()
+
         else:
-            # Если архив больше 50MB, разбиваем на части
-            await callback.message.edit_text(
+            # Если архив больше 45MB, разбиваем на части
+            await progress_msg.edit_text(
                 f"📦 Архив слишком большой ({len(archive_bytes) / 1024 / 1024:.1f} MB), разбиваю на части...")
 
             # Разбиваем на части
+            total_parts = (len(archive_bytes) + CHUNK_SIZE - 1) // CHUNK_SIZE
+
             for i in range(0, len(archive_bytes), CHUNK_SIZE):
                 chunk = archive_bytes[i:i + CHUNK_SIZE]
                 part_num = i // CHUNK_SIZE + 1
-                total_parts = (len(archive_bytes) + CHUNK_SIZE - 1) // CHUNK_SIZE
 
                 chunk_filename = f"{Path(original_name).stem}_part_{part_num}_of_{total_parts}.zip"
 
-                await callback.message.answer_document(
-                    types.BufferedInputFile(
-                        chunk,
-                        filename=chunk_filename
-                    ),
-                    caption=f"📁 Часть {part_num} из {total_parts} ({len(chunk) / 1024 / 1024:.1f} MB)"
-                )
+                # Отправляем часть
+                asyncio.create_task(send_document_with_retry(
+                    callback.message,
+                    chunk,
+                    chunk_filename,
+                    f"📁 Часть {part_num} из {total_parts} ({len(chunk) / 1024 / 1024:.1f} MB)"
+                ))
 
                 # Пауза между отправкой частей
                 await asyncio.sleep(1)
 
-        await callback.message.answer(f"✅ Преобразование завершено! Отправлено {len(images)} изображений в архиве.")
+            # Удаляем сообщение о прогрессе
+            await progress_msg.delete()
 
         # Очищаем временные файлы
-        pdf_processor.cleanup_temp_files(temp_dir)
-        # Также удаляем изображения
-        for image_path in images:
-            try:
-                if os.path.exists(image_path):
-                    os.remove(image_path)
-            except:
-                pass
+        await cleanup_images_and_temp(images, temp_dir)
 
     except Exception as e:
         logger.error(f"Error in process_images: {e}")
-        await callback.message.edit_text("❌ Произошла ошибка при обработке файла. Попробуйте еще раз.")
+        try:
+            await callback.message.edit_text("❌ Произошла ошибка при обработке файла. Попробуйте еще раз.")
+        except:
+            await callback.message.answer("❌ Произошла ошибка при обработке файла. Попробуйте еще раз.")
+
+
+async def send_document_with_retry(message, file_bytes, filename, caption, max_retries=3):
+    """Отправка документа с повторными попытками"""
+    for attempt in range(max_retries):
+        try:
+            await message.answer_document(
+                types.BufferedInputFile(
+                    file_bytes,
+                    filename=filename
+                ),
+                caption=caption
+            )
+            return True
+        except Exception as e:
+            logger.error(f"Error sending document (attempt {attempt + 1}/{max_retries}): {e}")
+            if attempt < max_retries - 1:
+                await asyncio.sleep(2 ** attempt)  # Экспоненциальная задержка
+    return False
+
+
+async def cleanup_images_and_temp(images, temp_dir):
+    """Очистка временных файлов"""
+    try:
+        # Удаляем изображения
+        for image_path in images:
+            if os.path.exists(image_path):
+                try:
+                    os.remove(image_path)
+                except:
+                    pass
+
+        # Удаляем временную директорию
+        if os.path.exists(temp_dir):
+            for root, dirs, files in os.walk(temp_dir, topdown=False):
+                for name in files:
+                    try:
+                        os.remove(os.path.join(root, name))
+                    except:
+                        pass
+                for name in dirs:
+                    try:
+                        os.rmdir(os.path.join(root, name))
+                    except:
+                        pass
+            try:
+                os.rmdir(temp_dir)
+            except:
+                pass
+    except Exception as e:
+        logger.error(f"Error cleaning up files: {e}")
 
 
 @dp.callback_query(F.data == "action_compress")
@@ -308,12 +379,12 @@ async def process_compress(callback: CallbackQuery, state: FSMContext):
     original_name = data.get('original_file_name', 'document')
 
     try:
-        await callback.message.edit_text("🔍 Анализирую структуру PDF...")
+        progress_msg = await callback.message.edit_text("🔍 Анализирую структуру PDF...")
 
         # Получаем информацию о файле
         original_size = os.path.getsize(input_pdf_path)
 
-        await callback.message.edit_text(
+        await progress_msg.edit_text(
             f"📊 Исходный размер: {original_size / 1024 / 1024:.2f} MB\n🔄 Начинаю сжатие...")
 
         # Используем умное сжатие
@@ -346,6 +417,7 @@ async def process_compress(callback: CallbackQuery, state: FSMContext):
             filename=f"compressed_{original_name}"
         )
 
+        await progress_msg.delete()
         await callback.message.answer_document(
             compressed_file,
             caption=result_message
@@ -357,7 +429,11 @@ async def process_compress(callback: CallbackQuery, state: FSMContext):
         pdf_processor.cleanup_temp_files(data.get('temp_dir'))
 
     except Exception as e:
-        pass
+        logger.error(f"Error in process_compress: {e}")
+        try:
+            await callback.message.edit_text("❌ Произошла ошибка при сжатии файла. Попробуйте еще раз.")
+        except:
+            await callback.message.answer("❌ Произошла ошибка при сжатии файла. Попробуйте еще раз.")
 
 
 @dp.callback_query(F.data == "action_contrast")
@@ -382,6 +458,7 @@ async def process_contrast(callback: CallbackQuery, state: FSMContext):
         reply_markup=get_contrast_apply_keyboard()
     )
 
+
 @dp.callback_query(F.data == "apply_contrast")
 async def apply_contrast(callback: CallbackQuery, state: FSMContext):
     """Применение настроек контраста/яркости к PDF"""
@@ -392,7 +469,7 @@ async def apply_contrast(callback: CallbackQuery, state: FSMContext):
     original_name = data.get('original_file_name', 'document')
 
     try:
-        await callback.message.edit_text("🎨 Применяю настройки контраста и яркости...")
+        progress_msg = await callback.message.edit_text("🎨 Применяю настройки контраста и яркости...")
 
         # Применяем настройки контраста и яркости
         enhanced_pdf_path = await pdf_processor.adjust_contrast_brightness(
@@ -405,6 +482,8 @@ async def apply_contrast(callback: CallbackQuery, state: FSMContext):
             enhanced_pdf_path,
             filename=f"enhanced_{original_name}"
         )
+
+        await progress_msg.delete()
         await callback.message.answer_document(
             enhanced_file,
             caption="✅ PDF файл обработан с настройками контраста и яркости"
@@ -416,7 +495,12 @@ async def apply_contrast(callback: CallbackQuery, state: FSMContext):
         pdf_processor.cleanup_temp_files(data.get('temp_dir'))
 
     except Exception as e:
-        pass
+        logger.error(f"Error in apply_contrast: {e}")
+        try:
+            await callback.message.edit_text("❌ Произошла ошибка при обработке файла. Попробуйте еще раз.")
+        except:
+            await callback.message.answer("❌ Произошла ошибка при обработке файла. Попробуйте еще раз.")
+
 
 @dp.callback_query(F.data == "action_settings")
 async def process_settings(callback: CallbackQuery):
@@ -438,6 +522,7 @@ async def process_settings(callback: CallbackQuery):
         parse_mode="HTML",
         reply_markup=get_settings_keyboard()
     )
+
 
 @dp.callback_query(F.data.startswith("settings_"))
 async def process_setting_select(callback: CallbackQuery):
@@ -462,6 +547,7 @@ async def process_setting_select(callback: CallbackQuery):
             reply_markup=get_brightness_keyboard()
         )
 
+
 @dp.callback_query(F.data.startswith("quality_"))
 async def process_quality_setting(callback: CallbackQuery):
     """Обработка выбора качества"""
@@ -484,6 +570,7 @@ async def process_quality_setting(callback: CallbackQuery):
         f"✅ Качество установлено: {dpi} DPI",
         reply_markup=get_back_to_settings_keyboard()
     )
+
 
 @dp.callback_query(F.data.startswith("contrast_"))
 async def process_contrast_setting(callback: CallbackQuery, state: FSMContext):
@@ -516,6 +603,7 @@ async def process_contrast_setting(callback: CallbackQuery, state: FSMContext):
         reply_markup=get_back_to_settings_keyboard()
     )
 
+
 @dp.callback_query(F.data.startswith("brightness_"))
 async def process_brightness_setting(callback: CallbackQuery, state: FSMContext):
     """Обработка выбора яркости"""
@@ -544,6 +632,7 @@ async def process_brightness_setting(callback: CallbackQuery, state: FSMContext)
         f"✅ Яркость установлена: {brightness}",
         reply_markup=get_back_to_settings_keyboard()
     )
+
 
 @dp.callback_query(F.data.startswith("back_to_"))
 async def process_back(callback: CallbackQuery, state: FSMContext):
@@ -584,6 +673,7 @@ async def process_back(callback: CallbackQuery, state: FSMContext):
             reply_markup=get_brightness_keyboard()
         )
 
+
 # Обработчики текстовых сообщений для кастомных настроек
 @dp.message(UserStates.waiting_for_contrast_settings)
 async def process_custom_contrast(message: Message, state: FSMContext):
@@ -602,6 +692,7 @@ async def process_custom_contrast(message: Message, state: FSMContext):
     except ValueError:
         await message.answer("❌ Пожалуйста, введите число. Например: 1.25")
 
+
 @dp.message(UserStates.waiting_for_brightness_settings)
 async def process_custom_brightness(message: Message, state: FSMContext):
     """Обработка пользовательского значения яркости"""
@@ -619,10 +710,12 @@ async def process_custom_brightness(message: Message, state: FSMContext):
     except ValueError:
         await message.answer("❌ Пожалуйста, введите целое число. Например: 15")
 
+
 # Запуск бота
 async def main():
     print("Бот запущен...")
     await dp.start_polling(bot, polling_timeout=30)
+
 
 if __name__ == "__main__":
     asyncio.run(main())
