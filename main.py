@@ -297,6 +297,7 @@ async def process_images(callback: CallbackQuery, state: FSMContext):
         logger.error(f"Error in process_images: {e}")
         await callback.message.edit_text("❌ Произошла ошибка при обработке файла. Попробуйте еще раз.")
 
+
 @dp.callback_query(F.data == "action_compress")
 async def process_compress(callback: CallbackQuery, state: FSMContext):
     """Обработка сжатия PDF"""
@@ -307,24 +308,60 @@ async def process_compress(callback: CallbackQuery, state: FSMContext):
     original_name = data.get('original_file_name', 'document')
 
     try:
-        await callback.message.edit_text("🔄 Сжимаю PDF файл...")
+        await callback.message.edit_text("🔍 Анализирую структуру PDF...")
 
-        # Сжимаем PDF
-        compressed_path = await pdf_processor.compress_pdf(input_pdf_path)
+        # Получаем информацию о файле
+        original_size = os.path.getsize(input_pdf_path)
+
+        await callback.message.edit_text(
+            f"📊 Исходный размер: {original_size / 1024 / 1024:.2f} MB\n🔄 Начинаю сжатие...")
+
+        # Используем умное сжатие
+        compressed_path = await pdf_processor.smart_compress_pdf(input_pdf_path)
+
+        # Получаем размер после сжатия
+        compressed_size = os.path.getsize(compressed_path)
+        compression_ratio = compressed_size / original_size
+
+        # Формируем сообщение о результате
+        result_message = (
+            f"✅ PDF файл сжат!\n\n"
+            f"📊 Результат:\n"
+            f"• Исходный размер: {original_size / 1024:.0f} KB\n"
+            f"• После сжатия: {compressed_size / 1024:.0f} KB\n"
+            f"• Экономия: {((original_size - compressed_size) / original_size * 100):.1f}%\n"
+            f"• Коэффициент: {compression_ratio:.2f}"
+        )
+
+        if compression_ratio > 0.95:
+            result_message += "\n\n⚠️ Сжатие незначительное. Файл уже оптимизирован."
+        elif compression_ratio > 0.8:
+            result_message += "\n\n✅ Умеренное сжатие."
+        else:
+            result_message += "\n\n🎉 Отличное сжатие!"
 
         # Отправляем сжатый файл
-        compressed_file = FSInputFile(compressed_path, filename=f"compressed_{original_name}")
+        compressed_file = FSInputFile(
+            compressed_path,
+            filename=f"compressed_{original_name}"
+        )
+
         await callback.message.answer_document(
             compressed_file,
-            caption="✅ PDF файл сжат без потери качества"
+            caption=result_message
         )
 
         # Очищаем временные файлы
-        os.remove(compressed_path)
+        if compressed_path != input_pdf_path:  # Не удаляем оригинал если он не сжался
+            os.remove(compressed_path)
         pdf_processor.cleanup_temp_files(data.get('temp_dir'))
 
     except Exception as e:
-        pass
+        logger.error(f"Error in compression: {e}")
+        await callback.message.edit_text(
+            "❌ Не удалось сжать PDF файл. Возможно, он уже оптимизирован.\n"
+            "Попробуйте преобразовать в изображения или настроить контраст."
+        )
 
 @dp.callback_query(F.data == "action_contrast")
 async def process_contrast(callback: CallbackQuery, state: FSMContext):
