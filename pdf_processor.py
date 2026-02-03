@@ -1003,34 +1003,7 @@ class PDFProcessor:
         return False
 
     async def compress_pdf_with_enhancement(self, pdf_path: str, user_id: int) -> str:
-        """Сжатие PDF с применением настроек контраста/яркости"""
-        user_settings = self.get_user_settings(user_id)
-        contrast = user_settings.get('contrast', 1.15)
-        brightness = user_settings.get('brightness', 0)
-
-        # ВСЕГДА применяем настройки, если они не равны дефолтным
-        if contrast != 1.15 or brightness != 0:
-
-
-            # Применяем настройки
-            enhanced_path = await self.adjust_contrast_brightness(
-                pdf_path,
-                user_id,
-                os.path.basename(pdf_path)
-            )
-
-            # Сжимаем результат
-            compressed_path = await self.compress_pdf_safe(enhanced_path, user_id)
-
-            # Удаляем промежуточный файл если нужно
-            if enhanced_path != compressed_path and enhanced_path != pdf_path:
-                if os.path.exists(enhanced_path):
-                    os.remove(enhanced_path)
-
-            return compressed_path
-        else:
-            # Просто сжимаем без изменений
-            return await self.compress_pdf_safe(pdf_path, user_id)
+        return await self.compress_pdf_safe(pdf_path, user_id)
 
     # Остальные методы остаются без изменений (optimize_image_size, compress_pdf и т.д.)
     def optimize_image_size(self, image_path: str, max_file_size: int = 1024 * 1024) -> bool:
