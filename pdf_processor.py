@@ -244,14 +244,13 @@ class PDFProcessor:
     async def enhance_image_with_settings(
             self,
             image_path: str,
-            contrast: float = 1.15,  # ИЗМЕНИЛ дефолт на 1.15
-            brightness: float = 0,  # Дефолт 0
+            contrast: float = 1.15,
+            brightness: float = 0,
             sharpness: float = 1.0,
             auto_enhance: bool = True
     ) -> str:
-        """Улучшение изображения"""
+        """Улучшение изображения с настройками яркости и контраста"""
         try:
-
             with Image.open(image_path) as img:
                 # Конвертируем в RGB если нужно
                 if img.mode != 'RGB':
@@ -261,7 +260,6 @@ class PDFProcessor:
                 if auto_enhance:
                     img = self.auto_enhance_image(img)
 
-                # ПРОСТО И ЯСНО применяем настройки
                 # 1. Яркость
                 if brightness != 0:
                     brightness_factor = 1 + (brightness / 100)
@@ -273,33 +271,31 @@ class PDFProcessor:
                     enhancer = ImageEnhance.Contrast(img)
                     img = enhancer.enhance(contrast)
 
-                # 3. Резкость
+                # 3. Резкость (опционально)
                 if sharpness != 1.0:
                     enhancer = ImageEnhance.Sharpness(img)
                     img = enhancer.enhance(sharpness)
 
-                # Сохраняем с БАЛАНСОМ качества и размера
+                # Сохраняем результат
                 output_path = image_path.replace('.png', '_enhanced.jpg')
 
-                # Автоматически определяем качество на основе настроек
+                # Определяем качество сохранения
                 if abs(brightness) > 30 or contrast > 1.5:
-                    # Высокие настройки - сильнее сжатие
-                    quality = 65
-                elif abs(brightness) > 15 or contrast > 1.2:
-                    # Средние настройки
-                    quality = 75
+                    quality = 70  # Немного ниже качество при сильных изменениях
                 else:
-                    # Низкие настройки
-                    quality = 85
+                    quality = 85  # Высокое качество для нормальных настроек
 
                 img.save(output_path, "JPEG", quality=quality, optimize=True)
 
+                # Удаляем оригинальный файл если это временный
+                if output_path != image_path and os.path.exists(image_path):
+                    os.remove(image_path)
 
                 return output_path
 
         except Exception as e:
-
-            return image_path
+            logger.error(f"Error enhancing image: {e}")
+            return image_path  # Возвращаем оригинал в случае ошибки
 
     def _apply_extreme_brightness(self, img: Image.Image, brightness: float) -> Image.Image:
         """Применение экстремальной яркости"""
@@ -453,26 +449,23 @@ class PDFProcessor:
     async def pdf_to_images_with_enhancement(
             self,
             pdf_path: str,
-            user_id: int = None,
-            dpi: int = 150
+            user_id: int = None
     ) -> List[str]:
-        """Конвертация PDF в улучшенные изображения"""
+        """Конвертация PDF в улучшенные изображения с применением настроек пользователя"""
         images = []
         temp_dir = tempfile.mkdtemp()
 
         try:
-            # Получаем настройки пользователя или используем дефолтные
+            # Получаем настройки пользователя
             if user_id:
                 settings = self.get_user_settings(user_id)
-                contrast = settings.get('contrast', self.default_settings['contrast'])
-                brightness = settings.get('brightness', self.default_settings['brightness'])
-                sharpness = settings.get('sharpness', self.default_settings['sharpness'])
-                auto_enhance = settings.get('auto_enhance', self.default_settings['auto_enhance'])
+                contrast = settings.get('contrast', 1.15)
+                brightness = settings.get('brightness', 0)
+                dpi = settings.get('dpi', 300)
             else:
-                contrast = self.default_settings['contrast']
-                brightness = self.default_settings['brightness']
-                sharpness = self.default_settings['sharpness']
-                auto_enhance = self.default_settings['auto_enhance']
+                contrast = 1.15
+                brightness = 0
+                dpi = 300
 
             doc = fitz.open(pdf_path)
 
@@ -490,39 +483,47 @@ class PDFProcessor:
                 temp_img_path = os.path.join(temp_dir, f"{pdf_name}_page_{page_num + 1}.png")
                 pix.save(temp_img_path)
 
-                # Применяем улучшения
+                # Применяем улучшения (яркость и контраст)
                 enhanced_img_path = await self.enhance_image_with_settings(
                     temp_img_path,
                     contrast=contrast,
                     brightness=brightness,
-                    sharpness=sharpness,
-                    auto_enhance=auto_enhance
+                    sharpness=1.0,  # Можно добавить в настройки если нужно
+                    auto_enhance=True
                 )
 
-                # Оптимизируем размер
-                self.optimize_image_size(enhanced_img_path)
+                # Оптимизируем размер для Telegram
+                self.optimize_image_size(enhanced_img_path, max_file_size=1024 * 1024)
 
                 images.append(enhanced_img_path)
 
-                # Удаляем временный файл
-                if os.path.exists(temp_img_path):
+                # Удаляем временный файл если он отличается от улучшенного
+                if enhanced_img_path != temp_img_path and os.path.exists(temp_img_path):
                     os.remove(temp_img_path)
 
             doc.close()
 
         except Exception as e:
-            print(f"Error converting PDF with enhancement: {e}")
-            raise
+            logger.error(f"Error converting PDF with enhancement: {e}")
+            # Пробуем базовый метод как запасной вариант
+            images = await self.pdf_to_images(pdf_path, dpi=dpi)
 
         return images
 
-    async def pdf_to_images(self, pdf_path: str, dpi: int = 300, max_size: int = 10000) -> List[str]:
+    async def pdf_to_images(self, pdf_path: str, dpi: int = None, max_size: int = 10000) -> List[str]:
         """Конвертация PDF в изображения"""
         images = []
         temp_dir = tempfile.mkdtemp()
 
         try:
+            # Если DPI не указан, используем настройки по умолчанию
+            if dpi is None:
+                dpi = 300
+
             doc = fitz.open(pdf_path)
+
+            # Получаем имя файла для названия изображений
+            pdf_name = os.path.splitext(os.path.basename(pdf_path))[0]
 
             for page_num in range(len(doc)):
                 page = doc.load_page(page_num)
@@ -540,14 +541,15 @@ class PDFProcessor:
                 mat = fitz.Matrix(zoom, zoom)
                 pix = page.get_pixmap(matrix=mat)
 
-                img_path = os.path.join(temp_dir, f"page_{page_num + 1}.png")
+                # Используем имя PDF файла в названии изображения
+                img_path = os.path.join(temp_dir, f"{pdf_name}_page_{page_num + 1}.png")
                 pix.save(img_path)
                 images.append(img_path)
 
             doc.close()
 
         except Exception as e:
-            print(f"Error converting PDF to images: {e}")
+            logger.error(f"Error converting PDF to images: {e}")
             raise
 
         return images

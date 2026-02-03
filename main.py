@@ -226,6 +226,7 @@ async def handle_pdf(message: Message, state: FSMContext):
         logger.error(f"Error processing PDF: {e}")
         await message.answer("❌ Произошла ошибка при обработке файла. Большой файл.")
 
+
 @dp.callback_query(F.data == "action_images")
 async def process_images(callback: CallbackQuery, state: FSMContext):
     """Обработка преобразования в изображения"""
@@ -241,17 +242,29 @@ async def process_images(callback: CallbackQuery, state: FSMContext):
         # Создаем прогресс-сообщение
         progress_msg = await callback.message.edit_text("🔄 Преобразую PDF в изображения...")
 
-        # Используем настройки пользователя
-        images = await pdf_processor.convert_to_images_with_settings(
+        # ИСПОЛЬЗУЕМ НОВУЮ ФУНКЦИЮ с применением настроек контраста/яркости
+        images = await pdf_processor.pdf_to_images_with_enhancement(
             input_pdf_path,
-            callback.from_user.id
+            callback.from_user.id  # Передаем user_id для получения настроек
         )
 
         if not images:
             await progress_msg.edit_text("❌ Не удалось преобразовать PDF в изображения.")
             return
 
-        await progress_msg.edit_text(f"✅ Создано {len(images)} изображений\n📤 Отправляю...")
+        # Получаем текущие настройки для информационного сообщения
+        user_settings = pdf_processor.get_user_settings(callback.from_user.id)
+        contrast = user_settings.get('contrast', 1.15)
+        brightness = user_settings.get('brightness', 0)
+
+        await progress_msg.edit_text(
+            f"✅ Создано {len(images)} изображений\n"
+            f"🎨 Применены настройки:\n"
+            f"• Контраст: {contrast:.2f}\n"
+            f"• Яркость: {brightness}\n\n"
+            f"📤 Отправляю...",
+            parse_mode="HTML"
+        )
 
         # Отправляем изображения группами
         await send_images_in_albums(callback.message, images, file_base_name)
@@ -260,8 +273,8 @@ async def process_images(callback: CallbackQuery, state: FSMContext):
         pdf_processor.cleanup_temp_files(temp_dir)
 
     except Exception as e:
-        pass
-
+        logger.error(f"Error processing images: {e}")
+        await callback.message.edit_text(f"❌ Ошибка при обработке: {str(e)}")
 
 async def send_images_in_albums(message: Message, images: list, original_name: str):
     """Отправка изображений альбомами по 10 штук"""
