@@ -444,14 +444,16 @@ async def process_compress(callback: CallbackQuery, state: FSMContext):
     except Exception as e:
         pass
 
+
 @dp.callback_query(F.data == "apply_contrast")
 async def apply_contrast(callback: CallbackQuery, state: FSMContext):
-    """Применение настроек контраста/яркости к PDF"""
+    """Применение настроек контраста/яркости к PDF с последующим сжатием"""
     await callback.answer()
 
     data = await state.get_data()
     input_pdf_path = data.get('input_pdf_path')
     original_name = data.get('original_file_name', 'document.pdf')
+    file_base_name = data.get('file_base_name', Path(original_name).stem)
 
     try:
         progress_msg = await callback.message.edit_text("🎨 Применяю настройки контраста и яркости...")
@@ -463,25 +465,57 @@ async def apply_contrast(callback: CallbackQuery, state: FSMContext):
             original_name  # Передаем оригинальное имя
         )
 
-        # Отправляем обработанный файл с оригинальным именем
-        enhanced_file = FSInputFile(
+        # Шаг 2: Сжимаем полученный PDF
+        await progress_msg.edit_text("🎨 Применяю настройки контраста и яркости...\n\n⚡ Далее будет сжатие файла...")
+
+        # Сжимаем улучшенный PDF
+        compressed_pdf_path = await pdf_processor.compress_pdf_with_enhancement(
             enhanced_pdf_path,
+            callback.from_user.id
+        )
+
+        # Получаем информацию о размерах
+        original_size = os.path.getsize(input_pdf_path)
+        enhanced_size = os.path.getsize(enhanced_pdf_path) if os.path.exists(enhanced_pdf_path) else original_size
+        compressed_size = os.path.getsize(compressed_pdf_path)
+
+        # Формируем информационное сообщение
+        size_info = (
+            f"\n\n📊 <b>Информация о размерах:</b>\n"
+            f"• Исходный: {original_size / 1024:.0f} KB\n"
+            f"• После улучшения: {enhanced_size / 1024:.0f} KB\n"
+            f"• После сжатия: {compressed_size / 1024:.0f} KB\n"
+        )
+
+        if compressed_size < original_size:
+            savings = ((original_size - compressed_size) / original_size * 100)
+            size_info += f"• Экономия: <b>{savings:.1f}%</b> 🎉"
+        else:
+            size_info += "• Файл уже оптимизирован"
+
+        # Отправляем сжатый файл с оригинальным именем
+        compressed_file = FSInputFile(
+            compressed_pdf_path,
             filename=original_name  # Отправляем с оригинальным именем
         )
 
         await progress_msg.delete()
         await callback.message.answer_document(
-            enhanced_file,
-            caption="✅ PDF файл обработан с настройками контраста и яркости"
+            compressed_file,
+            caption=f"✅ PDF файл обработан с настройками контраста и яркости{size_info}",
+            parse_mode="HTML"
         )
 
         # Очищаем временные файлы
-        if os.path.exists(enhanced_pdf_path):
+        if os.path.exists(enhanced_pdf_path) and enhanced_pdf_path != input_pdf_path:
             os.remove(enhanced_pdf_path)
+        if os.path.exists(compressed_pdf_path) and compressed_pdf_path != enhanced_pdf_path:
+            os.remove(compressed_pdf_path)
         pdf_processor.cleanup_temp_files(data.get('temp_dir'))
 
     except Exception as e:
-        pass
+        logger.error(f"Error applying contrast and compression: {e}")
+        await callback.message.answer("❌ Произошла ошибка при обработке файла.")
 
 @dp.callback_query(F.data == "action_contrast")
 async def process_contrast(callback: CallbackQuery, state: FSMContext):
