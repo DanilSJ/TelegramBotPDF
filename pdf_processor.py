@@ -247,84 +247,61 @@ class PDFProcessor:
     async def enhance_image_with_settings(
             self,
             image_path: str,
-            contrast: float = 2.0,  # Увеличил по умолчанию
-            brightness: float = 50,  # Увеличил по умолчанию
-            sharpness: float = 1.5,  # Увеличил по умолчанию
+            contrast: float = 1.15,  # ИЗМЕНИЛ дефолт на 1.15
+            brightness: float = 0,  # Дефолт 0
+            sharpness: float = 1.0,
             auto_enhance: bool = True
     ) -> str:
-        """Улучшение изображения с УСИЛЕННЫМИ настройками яркости и контраста"""
+        """Улучшение изображения"""
         try:
+
             with Image.open(image_path) as img:
                 # Конвертируем в RGB если нужно
                 if img.mode != 'RGB':
                     img = img.convert('RGB')
 
-                original_img = img.copy()
-
-                # Автоулучшение если включено (делаем более агрессивным)
+                # Автоулучшение
                 if auto_enhance:
                     img = self.auto_enhance_image(img)
 
-                # УСИЛЕННАЯ ЯРКОСТЬ - радикальное изменение
+                # ПРОСТО И ЯСНО применяем настройки
+                # 1. Яркость
                 if brightness != 0:
-                    # Для положительных значений - сильно осветляем
-                    if brightness > 0:
-                        brightness_factor = 1 + (brightness / 25)  # ОЧЕНЬ сильный эффект
-                        # Дополнительно применяем корректировку гаммы
-                        enhancer = ImageEnhance.Brightness(img)
-                        img = enhancer.enhance(brightness_factor)
+                    brightness_factor = 1 + (brightness / 100)
+                    enhancer = ImageEnhance.Brightness(img)
+                    img = enhancer.enhance(brightness_factor)
 
-                        # Применяем дополнительную коррекцию уровней для светлых областей
-                        if brightness > 30:
-                            # Максимально осветляем
-                            img = self._apply_extreme_brightness(img, brightness)
-                    else:
-                        # Для отрицательных значений - сильно затемняем
-                        brightness_factor = 1 - (abs(brightness) / 100)  # ОЧЕНЬ сильное затемнение
-                        enhancer = ImageEnhance.Brightness(img)
-                        img = enhancer.enhance(max(brightness_factor, 0.3))  # Не ниже 30%
-
-                        # Дополнительное затемнение через уровни
-                        if brightness < -30:
-                            img = self._apply_extreme_darkness(img, abs(brightness))
-
-                # УСИЛЕННЫЙ КОНТРАСТ - радикальное изменение цветов
+                # 2. Контраст
                 if contrast != 1.0:
-                    # Экстремальный контраст для заметного изменения цветов
-                    if contrast > 1.0:
-                        enhanced_contrast = contrast ** 2.5  # СИЛЬНОЕ усиление
-                        enhancer = ImageEnhance.Contrast(img)
-                        img = enhancer.enhance(min(enhanced_contrast, 4.0))  # Максимум 4.0
+                    enhancer = ImageEnhance.Contrast(img)
+                    img = enhancer.enhance(contrast)
 
-                        # Дополнительная насыщенность для усиления цветов
-                        if contrast > 1.5:
-                            img = self._boost_saturation(img, contrast)
-                    else:
-                        # Для уменьшения контраста (создания пастельных цветов)
-                        enhancer = ImageEnhance.Contrast(img)
-                        img = enhancer.enhance(max(contrast, 0.3))  # Не ниже 0.3
-
-                # УСИЛЕННАЯ РЕЗКОСТЬ
+                # 3. Резкость
                 if sharpness != 1.0:
                     enhancer = ImageEnhance.Sharpness(img)
-                    img = enhancer.enhance(min(sharpness, 3.0))  # Максимум 3.0
+                    img = enhancer.enhance(sharpness)
 
-                # Экстремальная коррекция цвета для максимального эффекта
-                if abs(brightness) > 30 or contrast > 1.8:
-                    img = self._apply_color_extremes(img, brightness, contrast)
-
-                # Добавляем виньетирование для драматического эффекта (если нужно)
-                if abs(brightness) > 40:
-                    img = self._add_vignette(img, brightness)
-
-                # Сохраняем результат
+                # Сохраняем с БАЛАНСОМ качества и размера
                 output_path = image_path.replace('.png', '_enhanced.jpg')
-                img.save(output_path, "JPEG", quality=95, optimize=True, subsampling=0)
+
+                # Автоматически определяем качество на основе настроек
+                if abs(brightness) > 30 or contrast > 1.5:
+                    # Высокие настройки - сильнее сжатие
+                    quality = 65
+                elif abs(brightness) > 15 or contrast > 1.2:
+                    # Средние настройки
+                    quality = 75
+                else:
+                    # Низкие настройки
+                    quality = 85
+
+                img.save(output_path, "JPEG", quality=quality, optimize=True)
+
 
                 return output_path
 
         except Exception as e:
-            print(f"Error enhancing image: {e}")
+
             return image_path
 
     def _apply_extreme_brightness(self, img: Image.Image, brightness: float) -> Image.Image:
@@ -608,15 +585,14 @@ class PDFProcessor:
 
                     # Если сжатие более 10% или это последний метод
                     if compression_ratio < 0.9 or compress_method == methods_to_try[-1]:
-                        print(
-                            f"Method {compress_method}: {original_size / 1024:.0f}KB -> {compressed_size / 1024:.0f}KB ({compression_ratio:.2%})")
+
                         return output_path
                     else:
                         # Удаляем плохо сжатый файл и пробуем следующий метод
                         os.remove(output_path)
 
             except Exception as e:
-                print(f"Error with {compress_method} compression: {e}")
+
                 continue
 
         # Если все методы не сработали, возвращаем исходный файл
@@ -848,19 +824,17 @@ class PDFProcessor:
         self.save_user_settings()
 
     async def adjust_contrast_brightness(self, pdf_path: str, user_id: int, original_name: str = None) -> str:
-        """Настройка контраста и яркости PDF с использованием настроек пользователя"""
-        # Получаем настройки пользователя
+        """Настройка контраста и яркости PDF"""
         user_settings = self.get_user_settings(user_id)
         contrast = user_settings.get('contrast', 1.15)
         brightness = user_settings.get('brightness', 0)
 
+
         temp_dir = tempfile.mkdtemp()
 
-        # Если передано оригинальное имя, используем его
         if original_name:
             output_pdf_name = original_name
         else:
-            # Иначе генерируем имя из оригинала
             original_basename = os.path.basename(pdf_path)
             name_without_ext = os.path.splitext(original_basename)[0]
             output_pdf_name = f"{name_without_ext}_enhanced.pdf"
@@ -874,22 +848,27 @@ class PDFProcessor:
             for page_num in range(len(doc)):
                 page = doc.load_page(page_num)
 
-                # Рендерим страницу как изображение с высоким DPI
-                zoom = 2.0  # 144 DPI (72 * 2)
+                # Устанавливаем FIXED DPI для консистентности
+                # 150 DPI достаточно для большинства документов
+                dpi = 150
+                zoom = dpi / 72
                 mat = fitz.Matrix(zoom, zoom)
-                pix = page.get_pixmap(matrix=mat)
+
+                # Рендерим страницу
+                pix = page.get_pixmap(matrix=mat, alpha=False)  # alpha=False для меньшего размера
 
                 # Сохраняем временное изображение
                 img_path = os.path.join(temp_dir, f"page_{page_num}.png")
                 pix.save(img_path)
 
-                # Применяем контраст и яркость
+                # ПРОСТОЙ вызов enhance_image_with_settings БЕЗ target_size_kb
                 enhanced_img_path = await self.enhance_image_with_settings(
                     img_path,
                     contrast=contrast,
                     brightness=brightness,
                     sharpness=1.0,
                     auto_enhance=True
+                    # НЕ передаем target_size_kb - пусть настройки применяются полноценно
                 )
 
                 processed_images.append(enhanced_img_path)
@@ -913,9 +892,94 @@ class PDFProcessor:
             return output_pdf_path
 
         except Exception as e:
-            print(f"Error adjusting contrast/brightness: {e}")
-            # В случае ошибки возвращаем оригинальный файл
+
+            import traceback
+            traceback.print_exc()
             return pdf_path
+
+    def _optimize_pdf_size(self, pdf_path: str):
+        """Оптимизация размера PDF файла"""
+        try:
+            # Переоткрываем и пересохраняем с оптимизацией
+            doc = fitz.open(pdf_path)
+            doc.save(pdf_path,
+                     garbage=4,  # Удаление неиспользуемых объектов
+                     deflate=True,  # Сжатие потоков
+                     clean=True)  # Очистка
+            doc.close()
+        except:
+            pass
+
+    def _create_pdf_from_images_alternative(self, images: list, output_path: str) -> str:
+        """Альтернативный метод создания PDF из изображений"""
+        try:
+            from PIL import Image
+            import img2pdf
+
+            # Открываем все изображения
+            img_objects = []
+            for img_path in images:
+                with Image.open(img_path) as img:
+                    if img.mode != 'RGB':
+                        img = img.convert('RGB')
+                    # Сохраняем с оптимизацией
+                    optimized_path = img_path + "_opt.jpg"
+                    img.save(optimized_path, "JPEG", quality=75, optimize=True)
+                    img_objects.append(optimized_path)
+
+            # Создаем PDF
+            with open(output_path, "wb") as f:
+                f.write(img2pdf.convert(img_objects))
+
+            # Удаляем временные файлы
+            for path in img_objects:
+                if os.path.exists(path):
+                    os.remove(path)
+
+            return output_path
+        except Exception as e:
+
+            raise
+
+    async def compress_pdf_safe(self, pdf_path: str, user_id: int) -> str:
+        """Безопасное сжатие без увеличения размера"""
+        original_size = os.path.getsize(pdf_path)
+
+        # Пробуем обычное сжатие
+        compressed_path = await self.compress_pdf_with_settings(pdf_path, user_id)
+        compressed_size = os.path.getsize(compressed_path)
+
+        # Если сжатый файл МЕНЬШЕ оригинала - возвращаем его
+        if compressed_size < original_size:
+            return compressed_path
+
+        # Если сжатый файл БОЛЬШЕ оригинала:
+
+        # 1. Пробуем разные методы сжатия
+        methods = ["light", "balanced", "aggressive"]
+
+        for method in methods:
+            try:
+                test_path = await self._compress_pdf_with_method(pdf_path, method)
+                test_size = os.path.getsize(test_path)
+
+                if test_size < original_size:
+
+                    if os.path.exists(compressed_path):
+                        os.remove(compressed_path)
+                    return test_path
+
+                # Удаляем тестовый файл если он не лучше
+                os.remove(test_path)
+
+            except:
+                continue
+
+        # 2. Если ничего не помогло, возвращаем оригинал
+
+        if os.path.exists(compressed_path) and compressed_path != pdf_path:
+            os.remove(compressed_path)
+        return pdf_path
 
     def get_enhancement_presets(self) -> Dict[str, Dict]:
         """Получение ПРЕДУСТАНОВЛЕННЫХ НАСТРОЕК с экстремальными эффектами"""
@@ -937,6 +1001,36 @@ class PDFProcessor:
             self.update_user_settings(user_id, presets[preset_name])
             return True
         return False
+
+    async def compress_pdf_with_enhancement(self, pdf_path: str, user_id: int) -> str:
+        """Сжатие PDF с применением настроек контраста/яркости"""
+        user_settings = self.get_user_settings(user_id)
+        contrast = user_settings.get('contrast', 1.15)
+        brightness = user_settings.get('brightness', 0)
+
+        # ВСЕГДА применяем настройки, если они не равны дефолтным
+        if contrast != 1.15 or brightness != 0:
+
+
+            # Применяем настройки
+            enhanced_path = await self.adjust_contrast_brightness(
+                pdf_path,
+                user_id,
+                os.path.basename(pdf_path)
+            )
+
+            # Сжимаем результат
+            compressed_path = await self.compress_pdf_safe(enhanced_path, user_id)
+
+            # Удаляем промежуточный файл если нужно
+            if enhanced_path != compressed_path and enhanced_path != pdf_path:
+                if os.path.exists(enhanced_path):
+                    os.remove(enhanced_path)
+
+            return compressed_path
+        else:
+            # Просто сжимаем без изменений
+            return await self.compress_pdf_safe(pdf_path, user_id)
 
     # Остальные методы остаются без изменений (optimize_image_size, compress_pdf и т.д.)
     def optimize_image_size(self, image_path: str, max_file_size: int = 1024 * 1024) -> bool:

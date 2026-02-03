@@ -24,14 +24,14 @@ os.makedirs("temp_files", exist_ok=True)
 os.makedirs("processed_files", exist_ok=True)
 
 # Настройки сессии с увеличенными таймаутами
-session = AiohttpSession(
-    api=TelegramAPIServer.from_base("http://localhost:8081", is_local=True),
-)
+# session = AiohttpSession(
+#     api=TelegramAPIServer.from_base("http://localhost:8081", is_local=True),
+# )
 
 # Инициализация бота с увеличенными таймаутами
 bot = Bot(
     token=Config.BOT_TOKEN,
-    session=session,
+    # session=session,
     timeout=1800,  # Увеличили до 30 минут
 )
 
@@ -397,8 +397,8 @@ async def process_compress(callback: CallbackQuery, state: FSMContext):
         await progress_msg.edit_text(
             f"📊 Исходный размер: {original_size / 1024 / 1024:.2f} MB\n🔄 Начинаю сжатие...")
 
-        # Используем сжатие с настройками пользователя
-        compressed_path = await pdf_processor.compress_pdf_with_settings(
+        # ИЗМЕНЕНИЕ ЗДЕСЬ: Используем новую функцию сжатия с настройками
+        compressed_path = await pdf_processor.compress_pdf_with_enhancement(
             input_pdf_path,
             callback.from_user.id
         )
@@ -416,6 +416,20 @@ async def process_compress(callback: CallbackQuery, state: FSMContext):
             f"• Экономия: {((original_size - compressed_size) / original_size * 100):.1f}%\n"
             f"• Коэффициент: {compression_ratio:.2f}"
         )
+
+        # Добавляем информацию о примененных настройках
+        user_settings = pdf_processor.get_user_settings(callback.from_user.id)
+        contrast = user_settings.get('contrast', 1.15)
+        brightness = user_settings.get('brightness', 0)
+
+        if contrast != 1.15 or brightness != 0:
+            result_message += f"\n\n🎨 Применены настройки:\n"
+            if contrast != 1.15:
+                result_message += f"• Контраст: {contrast:.2f}\n"
+            if brightness != 0:
+                result_message += f"• Яркость: {brightness}\n"
+        else:
+            result_message += "\n\n⚙️ Использованы настройки сжатия по умолчанию"
 
         if compression_ratio > 0.95:
             result_message += "\n\n⚠️ Сжатие незначительное. Файл уже оптимизирован."
@@ -444,7 +458,6 @@ async def process_compress(callback: CallbackQuery, state: FSMContext):
     except Exception as e:
         logger.error(f"Error compressing PDF: {e}")
         await callback.message.answer("❌ Произошла ошибка при сжатии PDF.")
-
 
 @dp.callback_query(F.data == "apply_contrast")
 async def apply_contrast(callback: CallbackQuery, state: FSMContext):
