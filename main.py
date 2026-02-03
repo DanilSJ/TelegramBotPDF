@@ -495,8 +495,7 @@ async def apply_contrast(callback: CallbackQuery, state: FSMContext):
         pdf_processor.cleanup_temp_files(data.get('temp_dir'))
 
     except Exception as e:
-        logger.error(f"Error applying contrast/brightness: {e}")
-        await callback.message.answer("❌ Произошла ошибка при обработке PDF.")
+        pass
 
 @dp.callback_query(F.data == "action_contrast")
 async def process_contrast(callback: CallbackQuery, state: FSMContext):
@@ -558,8 +557,7 @@ async def apply_contrast(callback: CallbackQuery, state: FSMContext):
         pdf_processor.cleanup_temp_files(data.get('temp_dir'))
 
     except Exception as e:
-        logger.error(f"Error applying contrast/brightness: {e}")
-        await callback.message.answer("❌ Произошла ошибка при обработке PDF.")
+        pass
 
 @dp.callback_query(F.data == "action_settings")
 async def process_settings(callback: CallbackQuery):
