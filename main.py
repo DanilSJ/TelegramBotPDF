@@ -214,6 +214,7 @@ async def process_images(callback: CallbackQuery, state: FSMContext):
     data = await state.get_data()
     input_pdf_path = data.get('input_pdf_path')
     original_name = data.get('original_file_name', 'document')
+    temp_dir = data.get('temp_dir')
 
     try:
         await callback.message.edit_text("🔄 Преобразую PDF в изображения...")
@@ -229,49 +230,82 @@ async def process_images(callback: CallbackQuery, state: FSMContext):
             await callback.message.edit_text("❌ Не удалось преобразовать PDF в изображения.")
             return
 
-        await callback.message.edit_text(f"✅ Создано {len(images)} изображений\n📦 Создаю архив...")
+        await callback.message.edit_text(f"✅ Создано {len(images)} изображений\n📦 Подготавливаю архивы...")
 
-        # Создаем ZIP архив в памяти
-        zip_buffer = io.BytesIO()
-        with zipfile.ZipFile(zip_buffer, 'w', zipfile.ZIP_DEFLATED) as zip_file:
-            for i, image_path in enumerate(images, 1):
-                # Добавляем изображение в архив
-                with open(image_path, 'rb') as img_file:
-                    img_data = img_file.read()
-                    zip_file.writestr(f"страница_{i}.png", img_data)
-
-        # Подготовка архива для отправки
-        zip_buffer.seek(0)
-        archive_size = len(zip_buffer.getvalue())
-
-        # Проверяем размер архива
-        if archive_size > 50 * 1024 * 1024:  # 50 MB - лимит Telegram
-            await callback.message.edit_text(
-                "⚠️ Архив слишком большой для отправки через Telegram.\n"
-                "Попробуйте уменьшить качество в настройках."
+        # Максимальный размер одного архива (40 MB для надежности)
+        MAX_ARCHIVE_SIZE = 40 * 1024 * 1024
+        
+        # Разделяем изображения на части
+        archives_data = []
+        current_archive_images = []
+        current_archive_size = 0
+        
+        for i, image_path in enumerate(images, 1):
+            # Получаем размер изображения
+            img_size = os.path.getsize(image_path)
+            
+            # Если добавление этого изображения превысит лимит, создаем новый архив
+            if current_archive_size + img_size > MAX_ARCHIVE_SIZE and current_archive_images:
+                # Создаем архив для текущей группы
+                archive_bytes = pdf_processor.create_archive_from_images(
+                    current_archive_images, 
+                    len(archives_data) + 1
+                )
+                archives_data.append(archive_bytes)
+                current_archive_images = []
+                current_archive_size = 0
+            
+            current_archive_images.append((i, image_path))
+            current_archive_size += img_size
+        
+        # Добавляем последний архив
+        if current_archive_images:
+            archive_bytes = pdf_processor.create_archive_from_images(
+                current_archive_images, 
+                len(archives_data) + 1
             )
-            return
+            archives_data.append(archive_bytes)
 
-        # Отправляем архив
-        await callback.message.answer_document(
-            types.BufferedInputFile(
-                zip_buffer.getvalue(),
-                filename=f"{Path(original_name).stem}_images.zip"
-            ),
-            caption=f"📁 Архив с {len(images)} страницами из PDF"
-        )
+        # Отправляем архивы
+        total_archives = len(archives_data)
+        for idx, archive_bytes in enumerate(archives_data, 1):
+            if total_archives > 1:
+                archive_name = f"{Path(original_name).stem}_part_{idx}_of_{total_archives}.zip"
+                caption = f"📁 Архив {idx}/{total_archives} (часть {idx} из {total_archives})"
+            else:
+                archive_name = f"{Path(original_name).stem}_images.zip"
+                caption = f"📁 Все изображения ({len(images)} страниц)"
 
-        await callback.message.answer("✅ Преобразование завершено! Все изображения в архиве.")
+            await callback.message.answer_document(
+                types.BufferedInputFile(
+                    archive_bytes,
+                    filename=archive_name
+                ),
+                caption=caption
+            )
+            
+            # Небольшая пауза между отправками, чтобы не перегружать API
+            if idx < total_archives:
+                await asyncio.sleep(0.5)
+
+        await callback.message.answer(f"✅ Преобразование завершено! Отправлено {total_archives} архивов.")
 
         # Очищаем временные файлы
-        pdf_processor.cleanup_temp_files(data.get('temp_dir'))
+        pdf_processor.cleanup_temp_files(temp_dir)
+        # Также удаляем изображения
+        for image_path in images:
+            try:
+                if os.path.exists(image_path):
+                    os.remove(image_path)
+            except:
+                pass
 
     except Exception as e:
         logger.error(f"Error in process_images: {e}", exc_info=True)
         await callback.message.answer("❌ Ошибка при преобразовании PDF в изображения.")
     finally:
         await state.clear()
-
+        
 @dp.callback_query(F.data == "action_compress")
 async def process_compress(callback: CallbackQuery, state: FSMContext):
     """Обработка сжатия PDF"""
