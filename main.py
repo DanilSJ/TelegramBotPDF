@@ -268,12 +268,12 @@ async def process_images(callback: CallbackQuery, state: FSMContext):
         await progress_msg.edit_text(f"📤 Отправляю архив ({len(archive_bytes) / 1024 / 1024:.1f} MB)...")
 
         # Используем отдельную задачу для отправки
-        asyncio.create_task(send_document_with_retry(
+        await send_document_with_retry(
             callback.message,
             archive_bytes,
             archive_name,
             f"📁 Все изображения ({len(images)} страниц)"
-        ))
+        )
 
         # Удаляем сообщение о прогрессе через 2 секунды
         await asyncio.sleep(2)
