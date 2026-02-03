@@ -27,7 +27,15 @@ os.makedirs("temp_files", exist_ok=True)
 os.makedirs("processed_files", exist_ok=True)
 
 
-session = AiohttpSession(api=TelegramAPIServer.from_base("http://localhost:8081", is_local=True))
+session = AiohttpSession(
+    api=TelegramAPIServer.from_base("http://localhost:8081", is_local=True),
+    timeout=aiohttp.ClientTimeout(
+        total=60.0,
+        connect=30.0,
+        sock_read=60.0,
+        sock_connect=60.0,
+    ),
+)
 
 # Инициализация бота и диспетчера
 bot = Bot(
