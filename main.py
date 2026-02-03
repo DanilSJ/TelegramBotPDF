@@ -1,8 +1,6 @@
 import os
 import asyncio
 import logging
-import zipfile
-import io
 from aiogram import Bot, Dispatcher, types, F
 from aiogram.client.session.aiohttp import AiohttpSession
 from aiogram.client.telegram import TelegramAPIServer
@@ -14,7 +12,6 @@ from aiogram.fsm.storage.memory import MemoryStorage
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 import tempfile
 from pathlib import Path
-import aiohttp
 from pdf_processor import PDFProcessor
 from config import Config
 
@@ -260,10 +257,6 @@ async def process_images(callback: CallbackQuery, state: FSMContext):
         # Отправляем один архив
         archive_name = f"{Path(original_name).stem}_images.zip"
 
-        # Разбиваем на части если файл больше 45MB (ограничение Telegram)
-        CHUNK_SIZE = 400 * 1024 * 1024  # 45MB (оставляем запас)
-
-
         # Если архив меньше 45MB, отправляем как есть
         await progress_msg.edit_text(f"📤 Отправляю архив ({len(archive_bytes) / 1024 / 1024:.1f} MB)...")
 
@@ -282,11 +275,7 @@ async def process_images(callback: CallbackQuery, state: FSMContext):
         await cleanup_images_and_temp(images, temp_dir)
 
     except Exception as e:
-        logger.error(f"Error in process_images: {e}")
-        try:
-            await callback.message.edit_text("❌ Произошла ошибка при обработке файла. Попробуйте еще раз.")
-        except:
-            await callback.message.answer("❌ Произошла ошибка при обработке файла. Попробуйте еще раз.")
+        pass
 
 
 async def send_document_with_retry(message, file_bytes, filename, caption, max_retries=1):
@@ -398,11 +387,7 @@ async def process_compress(callback: CallbackQuery, state: FSMContext):
         pdf_processor.cleanup_temp_files(data.get('temp_dir'))
 
     except Exception as e:
-        logger.error(f"Error in process_compress: {e}")
-        try:
-            await callback.message.edit_text("❌ Произошла ошибка при сжатии файла. Попробуйте еще раз.")
-        except:
-            await callback.message.answer("❌ Произошла ошибка при сжатии файла. Попробуйте еще раз.")
+        pass
 
 
 @dp.callback_query(F.data == "action_contrast")
@@ -464,12 +449,7 @@ async def apply_contrast(callback: CallbackQuery, state: FSMContext):
         pdf_processor.cleanup_temp_files(data.get('temp_dir'))
 
     except Exception as e:
-        logger.error(f"Error in apply_contrast: {e}")
-        try:
-            await callback.message.edit_text("❌ Произошла ошибка при обработке файла. Попробуйте еще раз.")
-        except:
-            await callback.message.answer("❌ Произошла ошибка при обработке файла. Попробуйте еще раз.")
-
+        pass
 
 @dp.callback_query(F.data == "action_settings")
 async def process_settings(callback: CallbackQuery):

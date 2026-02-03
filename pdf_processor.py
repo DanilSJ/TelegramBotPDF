@@ -3,17 +3,11 @@ import os
 import asyncio
 import tempfile
 import zipfile
-import subprocess
-from pathlib import Path
-from typing import List, Dict, Optional, Tuple
+from typing import List, Dict, Optional
 import fitz
 from PIL import Image, ImageEnhance
 import img2pdf
 import json
-import re
-
-from aiogram.types import BufferedInputFile
-
 
 class PDFProcessor:
     def __init__(self):
