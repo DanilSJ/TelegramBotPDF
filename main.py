@@ -24,14 +24,14 @@ os.makedirs("temp_files", exist_ok=True)
 os.makedirs("processed_files", exist_ok=True)
 
 # Настройки сессии с увеличенными таймаутами
-# session = AiohttpSession(
-#     api=TelegramAPIServer.from_base("http://localhost:8081", is_local=True),
-# )
+session = AiohttpSession(
+    api=TelegramAPIServer.from_base("http://localhost:8081", is_local=True),
+)
 
 # Инициализация бота с увеличенными таймаутами
 bot = Bot(
     token=Config.BOT_TOKEN,
-    # session=session,
+    session=session,
     timeout=1800,  # Увеличили до 30 минут
 )
 
