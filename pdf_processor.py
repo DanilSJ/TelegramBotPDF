@@ -16,10 +16,11 @@ class PDFProcessor:
         self.user_settings_file = "user_settings.json"
         self.user_settings = self.load_user_settings()
         self.default_settings = {
-            'contrast': 1.5,  # Увеличил по умолчанию
-            'brightness': 20,  # Увеличил по умолчанию
-            'sharpness': 1.2,
-            'auto_enhance': True
+            'contrast': 2.0,  # Увеличил до экстремального
+            'brightness': 50,  # Увеличил до экстремального
+            'sharpness': 1.5,
+            'auto_enhance': True,
+            'dpi': 300
         }
 
     def load_user_settings(self) -> Dict:
@@ -243,16 +244,15 @@ class PDFProcessor:
                 except Exception as e:
                     print(f"Error optimizing image {img_index} on page {page_num}: {e}")
 
-
     async def enhance_image_with_settings(
             self,
             image_path: str,
-            contrast: float = 1.5,
-            brightness: float = 20,
-            sharpness: float = 1.2,
+            contrast: float = 2.0,  # Увеличил по умолчанию
+            brightness: float = 50,  # Увеличил по умолчанию
+            sharpness: float = 1.5,  # Увеличил по умолчанию
             auto_enhance: bool = True
     ) -> str:
-        """Улучшение изображения с расширенными настройками"""
+        """Улучшение изображения с УСИЛЕННЫМИ настройками яркости и контраста"""
         try:
             with Image.open(image_path) as img:
                 # Конвертируем в RGB если нужно
@@ -261,44 +261,191 @@ class PDFProcessor:
 
                 original_img = img.copy()
 
-                # Автоулучшение если включено
+                # Автоулучшение если включено (делаем более агрессивным)
                 if auto_enhance:
                     img = self.auto_enhance_image(img)
 
-                # Применяем яркость с усиленным эффектом
+                # УСИЛЕННАЯ ЯРКОСТЬ - радикальное изменение
                 if brightness != 0:
-                    # Преобразуем в более агрессивное значение
-                    brightness_factor = 1 + (brightness / 50)  # Более сильный эффект
-                    enhancer = ImageEnhance.Brightness(img)
-                    img = enhancer.enhance(brightness_factor)
+                    # Для положительных значений - сильно осветляем
+                    if brightness > 0:
+                        brightness_factor = 1 + (brightness / 25)  # ОЧЕНЬ сильный эффект
+                        # Дополнительно применяем корректировку гаммы
+                        enhancer = ImageEnhance.Brightness(img)
+                        img = enhancer.enhance(brightness_factor)
 
-                # Применяем контраст с усиленным эффектом
+                        # Применяем дополнительную коррекцию уровней для светлых областей
+                        if brightness > 30:
+                            # Максимально осветляем
+                            img = self._apply_extreme_brightness(img, brightness)
+                    else:
+                        # Для отрицательных значений - сильно затемняем
+                        brightness_factor = 1 - (abs(brightness) / 100)  # ОЧЕНЬ сильное затемнение
+                        enhancer = ImageEnhance.Brightness(img)
+                        img = enhancer.enhance(max(brightness_factor, 0.3))  # Не ниже 30%
+
+                        # Дополнительное затемнение через уровни
+                        if brightness < -30:
+                            img = self._apply_extreme_darkness(img, abs(brightness))
+
+                # УСИЛЕННЫЙ КОНТРАСТ - радикальное изменение цветов
                 if contrast != 1.0:
-                    # Используем квадрат значения для более сильного эффекта
-                    enhanced_contrast = contrast ** 1.5
-                    enhancer = ImageEnhance.Contrast(img)
-                    img = enhancer.enhance(enhanced_contrast)
+                    # Экстремальный контраст для заметного изменения цветов
+                    if contrast > 1.0:
+                        enhanced_contrast = contrast ** 2.5  # СИЛЬНОЕ усиление
+                        enhancer = ImageEnhance.Contrast(img)
+                        img = enhancer.enhance(min(enhanced_contrast, 4.0))  # Максимум 4.0
 
-                # Применяем резкость
+                        # Дополнительная насыщенность для усиления цветов
+                        if contrast > 1.5:
+                            img = self._boost_saturation(img, contrast)
+                    else:
+                        # Для уменьшения контраста (создания пастельных цветов)
+                        enhancer = ImageEnhance.Contrast(img)
+                        img = enhancer.enhance(max(contrast, 0.3))  # Не ниже 0.3
+
+                # УСИЛЕННАЯ РЕЗКОСТЬ
                 if sharpness != 1.0:
                     enhancer = ImageEnhance.Sharpness(img)
-                    img = enhancer.enhance(sharpness)
+                    img = enhancer.enhance(min(sharpness, 3.0))  # Максимум 3.0
 
-                # Добавляем легкую шумоподавление для сканов
-                if img.mode == 'RGB':
-                    # Легкая медианная фильтрация для уменьшения шума
-                    img = img.filter(ImageFilter.MedianFilter(size=1))
+                # Экстремальная коррекция цвета для максимального эффекта
+                if abs(brightness) > 30 or contrast > 1.8:
+                    img = self._apply_color_extremes(img, brightness, contrast)
+
+                # Добавляем виньетирование для драматического эффекта (если нужно)
+                if abs(brightness) > 40:
+                    img = self._add_vignette(img, brightness)
 
                 # Сохраняем результат
                 output_path = image_path.replace('.png', '_enhanced.jpg')
                 img.save(output_path, "JPEG", quality=95, optimize=True, subsampling=0)
-
 
                 return output_path
 
         except Exception as e:
             print(f"Error enhancing image: {e}")
             return image_path
+
+    def _apply_extreme_brightness(self, img: Image.Image, brightness: float) -> Image.Image:
+        """Применение экстремальной яркости"""
+        import numpy as np
+
+        img_array = np.array(img, dtype=np.float32)
+
+        # Сильное осветление всех каналов
+        boost_factor = 1 + (brightness / 50)  # Очень агрессивный коэффициент
+        img_array = img_array * boost_factor
+
+        # Добавляем смещение для очень светлых тонов
+        offset = brightness * 2
+        img_array = img_array + offset
+
+        # Обрезаем значения
+        img_array = np.clip(img_array, 0, 255)
+
+        return Image.fromarray(img_array.astype(np.uint8))
+
+    def _apply_extreme_darkness(self, img: Image.Image, darkness: float) -> Image.Image:
+        """Применение экстремальной темноты"""
+        import numpy as np
+
+        img_array = np.array(img, dtype=np.float32)
+
+        # Сильное затемнение
+        dark_factor = 1 - (darkness / 100)
+        img_array = img_array * max(dark_factor, 0.1)  # Не ниже 10%
+
+        # Дополнительное смещение для очень темных тонов
+        offset = -darkness * 1.5
+        img_array = img_array + offset
+
+        # Обрезаем значения
+        img_array = np.clip(img_array, 0, 255)
+
+        return Image.fromarray(img_array.astype(np.uint8))
+
+    def _boost_saturation(self, img: Image.Image, contrast: float) -> Image.Image:
+        """Усиление насыщенности цвета"""
+        from PIL import ImageEnhance
+
+        # Конвертируем в HSV для работы с насыщенностью
+        hsv_img = img.convert('HSV')
+        h, s, v = hsv_img.split()
+
+        # Усиливаем насыщенность
+        saturation_factor = min(1.0 + (contrast - 1.0) * 0.5, 3.0)
+        enhancer = ImageEnhance.Brightness(s)
+        s_enhanced = enhancer.enhance(saturation_factor)
+
+        # Собираем обратно
+        enhanced_hsv = Image.merge('HSV', (h, s_enhanced, v))
+        return enhanced_hsv.convert('RGB')
+
+    def _apply_color_extremes(self, img: Image.Image, brightness: float, contrast: float) -> Image.Image:
+        """Применение экстремальной коррекции цвета"""
+        import numpy as np
+
+        img_array = np.array(img, dtype=np.float32)
+
+        # Разделяем каналы
+        r, g, b = img_array[:, :, 0], img_array[:, :, 1], img_array[:, :, 2]
+
+        # Создаем экстремальные цветовые эффекты
+        if brightness > 0:
+            # Для осветления - усиливаем теплые тоны
+            r = r * (1.0 + (brightness / 100) * 0.3)
+            g = g * (1.0 + (brightness / 100) * 0.1)
+        elif brightness < 0:
+            # Для затемнения - усиливаем холодные тоны
+            b = b * (1.0 + (abs(brightness) / 100) * 0.2)
+
+        if contrast > 1.5:
+            # Экстремальный контраст - разделение тонов
+            mask = (r + g + b) / 3 > 128
+            r[mask] = r[mask] * 1.2
+            g[mask] = g[mask] * 1.2
+            b[mask] = b[mask] * 1.2
+            r[~mask] = r[~mask] * 0.8
+            g[~mask] = g[~mask] * 0.8
+            b[~mask] = b[~mask] * 0.8
+
+        # Собираем обратно и обрезаем
+        img_array = np.stack([r, g, b], axis=2)
+        img_array = np.clip(img_array, 0, 255)
+
+        return Image.fromarray(img_array.astype(np.uint8))
+
+    def _add_vignette(self, img: Image.Image, brightness: float) -> Image.Image:
+        """Добавление виньетирования для драматического эффекта"""
+        import numpy as np
+        from PIL import ImageFilter
+
+        width, height = img.size
+
+        # Создаем маску виньетирования
+        x = np.linspace(-1, 1, width)
+        y = np.linspace(-1, 1, height)
+        X, Y = np.meshgrid(x, y)
+
+        # Радиальная маска
+        radius = np.sqrt(X ** 2 + Y ** 2)
+
+        if brightness > 0:
+            # Для осветления - края темнее
+            vignette = 1 - 0.5 * radius ** 2
+        else:
+            # Для затемнения - края светлее
+            vignette = 0.5 + 0.5 * radius ** 2
+
+        vignette = np.clip(vignette, 0, 1)
+
+        # Применяем маску к изображению
+        img_array = np.array(img, dtype=np.float32)
+        img_array = img_array * vignette[..., np.newaxis]
+        img_array = np.clip(img_array, 0, 255)
+
+        return Image.fromarray(img_array.astype(np.uint8))
 
     def auto_enhance_image(self, img: Image.Image) -> Image.Image:
         """Автоматическое улучшение изображения"""
@@ -771,13 +918,15 @@ class PDFProcessor:
             return pdf_path
 
     def get_enhancement_presets(self) -> Dict[str, Dict]:
-        """Получение предустановленных настроек улучшения"""
+        """Получение ПРЕДУСТАНОВЛЕННЫХ НАСТРОЕК с экстремальными эффектами"""
         return {
-            'light': {'contrast': 1.2, 'brightness': 10, 'sharpness': 1.1, 'auto_enhance': True},
-            'medium': {'contrast': 1.5, 'brightness': 20, 'sharpness': 1.2, 'auto_enhance': True},
-            'strong': {'contrast': 2.0, 'brightness': 30, 'sharpness': 1.5, 'auto_enhance': True},
-            'text_only': {'contrast': 2.5, 'brightness': 15, 'sharpness': 2.0, 'auto_enhance': False},
-            'photo': {'contrast': 1.3, 'brightness': 25, 'sharpness': 1.1, 'auto_enhance': True},
+            'light': {'contrast': 1.5, 'brightness': 30, 'sharpness': 1.2, 'auto_enhance': True},
+            'medium': {'contrast': 2.0, 'brightness': 50, 'sharpness': 1.5, 'auto_enhance': True},
+            'strong': {'contrast': 2.5, 'brightness': 70, 'sharpness': 2.0, 'auto_enhance': True},
+            'extreme_light': {'contrast': 3.0, 'brightness': 80, 'sharpness': 2.5, 'auto_enhance': False},
+            'extreme_dark': {'contrast': 2.8, 'brightness': -60, 'sharpness': 2.0, 'auto_enhance': False},
+            'vivid_colors': {'contrast': 2.2, 'brightness': 40, 'sharpness': 1.8, 'auto_enhance': True},
+            'dramatic_bw': {'contrast': 3.0, 'brightness': 20, 'sharpness': 2.5, 'auto_enhance': False},
             'custom': {}  # Пользовательские настройки
         }
 
