@@ -181,6 +181,7 @@ async def cmd_help(message: Message):
 
 
 @dp.message(F.document)
+@dp.message(F.document)
 async def handle_pdf(message: Message, state: FSMContext):
     """Обработка полученного PDF файла"""
     if message.document.mime_type != "application/pdf":
@@ -195,14 +196,12 @@ async def handle_pdf(message: Message, state: FSMContext):
         file = await bot.get_file(file_id)
         file_path = file.file_path
 
-        # Сохраняем оригинальное имя файла
+        # Получаем оригинальное имя файла
         original_name = message.document.file_name
-        # Убираем расширение .pdf для дальнейшего использования
-        file_base_name = Path(original_name).stem
 
-        # Сохраняем временный файл с оригинальным именем
+        # Создаем временный файл с оригинальным именем
         temp_dir = tempfile.mkdtemp()
-        input_pdf_path = os.path.join(temp_dir, original_name)  # Используем оригинальное имя
+        input_pdf_path = os.path.join(temp_dir, original_name)  # Сохраняем с оригинальным именем
         await bot.download_file(file_path, input_pdf_path)
 
         # Сохраняем информацию о файле в состоянии
@@ -210,8 +209,7 @@ async def handle_pdf(message: Message, state: FSMContext):
             input_pdf_path=input_pdf_path,
             temp_dir=temp_dir,
             file_id=file_id,
-            original_file_name=original_name,
-            file_base_name=file_base_name  # Сохраняем имя без расширения
+            original_file_name=original_name  # Сохраняем оригинальное имя
         )
 
         await message.answer(
@@ -225,7 +223,6 @@ async def handle_pdf(message: Message, state: FSMContext):
     except Exception as e:
         logger.error(f"Error processing PDF: {e}")
         await message.answer("❌ Произошла ошибка при обработке файла. Попробуйте еще раз.")
-
 
 @dp.callback_query(F.data == "action_images")
 async def process_images(callback: CallbackQuery, state: FSMContext):
@@ -267,9 +264,13 @@ async def process_images(callback: CallbackQuery, state: FSMContext):
         logger.error(f"Error converting PDF to images: {e}")
         await callback.message.answer("❌ Произошла ошибка при конвертации PDF.")
 
-async def send_images_in_albums(message: Message, images: list, file_base_name: str):
+
+async def send_images_in_albums(message: Message, images: list, original_name: str):
     """Отправка изображений альбомами по 10 штук"""
     try:
+        # Получаем имя без расширения
+        name_without_ext = os.path.splitext(original_name)[0]
+
         # Разбиваем изображения на группы по 10 (максимум для медиагруппы в Telegram)
         chunk_size = 10
         for i in range(0, len(images), chunk_size):
@@ -280,8 +281,8 @@ async def send_images_in_albums(message: Message, images: list, file_base_name: 
 
             for j, image_path in enumerate(chunk, 1):
                 page_num = i + j
-                # Используем оригинальное имя файла + номер страницы
-                caption = f"📄 {file_base_name}"
+                # Используем оригинальное имя файла
+                caption = f"📄 {name_without_ext} - страница {page_num}"
 
                 # Оптимизируем размер изображения для Telegram
                 pdf_processor.optimize_image_size(image_path, max_file_size=1024 * 1024)  # 1MB максимум
@@ -291,7 +292,7 @@ async def send_images_in_albums(message: Message, images: list, file_base_name: 
                         types.InputMediaPhoto(
                             media=types.BufferedInputFile(
                                 img_file.read(),
-                                filename=f"{file_base_name}_страница_{page_num}.jpg"  # Используем оригинальное имя
+                                filename=f"{name_without_ext}_страница_{page_num}.jpg"  # Используем оригинальное имя
                             ),
                             caption=caption if caption else None
                         )
@@ -307,8 +308,7 @@ async def send_images_in_albums(message: Message, images: list, file_base_name: 
     except Exception as e:
         logger.error(f"Error sending images: {e}")
         # Пробуем отправить по одному если групповой отправка не работает
-        await send_images_one_by_one(message, images, file_base_name)
-
+        await send_images_one_by_one(message, images, name_without_ext)
 
 async def send_images_one_by_one(message: Message, images: list, file_base_name: str):
     """Отправка изображений по одному (запасной вариант)"""
@@ -387,7 +387,6 @@ async def process_compress(callback: CallbackQuery, state: FSMContext):
     data = await state.get_data()
     input_pdf_path = data.get('input_pdf_path')
     original_name = data.get('original_file_name', 'document.pdf')
-    file_base_name = data.get('file_base_name', Path(original_name).stem)
 
     try:
         progress_msg = await callback.message.edit_text("🔍 Анализирую структуру PDF...")
@@ -428,7 +427,7 @@ async def process_compress(callback: CallbackQuery, state: FSMContext):
         # Отправляем сжатый файл с оригинальным именем
         compressed_file = FSInputFile(
             compressed_path,
-            filename=f"{file_base_name}_сжатый.pdf"  # Используем оригинальное имя
+            filename=original_name  # Отправляем с оригинальным именем
         )
 
         await progress_msg.delete()
@@ -455,7 +454,6 @@ async def apply_contrast(callback: CallbackQuery, state: FSMContext):
     data = await state.get_data()
     input_pdf_path = data.get('input_pdf_path')
     original_name = data.get('original_file_name', 'document.pdf')
-    file_base_name = data.get('file_base_name', Path(original_name).stem)
 
     try:
         progress_msg = await callback.message.edit_text("🎨 Применяю настройки контраста и яркости...")
@@ -463,13 +461,14 @@ async def apply_contrast(callback: CallbackQuery, state: FSMContext):
         # Применяем настройки контраста и яркости
         enhanced_pdf_path = await pdf_processor.adjust_contrast_brightness(
             input_pdf_path,
-            callback.from_user.id
+            callback.from_user.id,
+            original_name  # Передаем оригинальное имя
         )
 
         # Отправляем обработанный файл с оригинальным именем
         enhanced_file = FSInputFile(
             enhanced_pdf_path,
-            filename=f"{file_base_name}_улучшенный.pdf"  # Используем оригинальное имя
+            filename=original_name  # Отправляем с оригинальным именем
         )
 
         await progress_msg.delete()
