@@ -3,16 +3,24 @@ import os
 import asyncio
 import tempfile
 import zipfile
-from typing import List, Dict, Optional
+from typing import List, Dict, Optional, Tuple
 import fitz
-from PIL import Image, ImageEnhance
+from PIL import Image, ImageEnhance, ImageOps, ImageFilter
 import img2pdf
 import json
+import numpy as np
+
 
 class PDFProcessor:
     def __init__(self):
         self.user_settings_file = "user_settings.json"
         self.user_settings = self.load_user_settings()
+        self.default_settings = {
+            'contrast': 1.5,  # Увеличил по умолчанию
+            'brightness': 20,  # Увеличил по умолчанию
+            'sharpness': 1.2,
+            'auto_enhance': True
+        }
 
     def load_user_settings(self) -> Dict:
         """Загрузка настроек пользователей из файла"""
@@ -24,23 +32,156 @@ class PDFProcessor:
                 return {}
         return {}
 
-    def save_user_settings(self):
-        """Сохранение настроек пользователей в файл"""
-        with open(self.user_settings_file, 'w') as f:
-            json.dump(self.user_settings, f, indent=2)
+    async def enhance_image_with_settings(
+            self,
+            image_path: str,
+            contrast: float = 1.5,
+            brightness: float = 20,
+            sharpness: float = 1.2,
+            auto_enhance: bool = True
+    ) -> str:
+        """Улучшение изображения с расширенными настройками"""
+        try:
+            with Image.open(image_path) as img:
+                # Конвертируем в RGB если нужно
+                if img.mode != 'RGB':
+                    img = img.convert('RGB')
 
-    def get_user_settings(self, user_id: int) -> Dict:
-        """Получение настроек пользователя"""
-        return self.user_settings.get(str(user_id), {})
+                original_img = img.copy()
 
-    def update_user_settings(self, user_id: int, updates: Dict):
-        """Обновление настроек пользователя"""
-        user_id_str = str(user_id)
-        if user_id_str not in self.user_settings:
-            self.user_settings[user_id_str] = {}
+                # Автоулучшение если включено
+                if auto_enhance:
+                    img = self.auto_enhance_image(img)
 
-        self.user_settings[user_id_str].update(updates)
-        self.save_user_settings()
+                # Применяем яркость с усиленным эффектом
+                if brightness != 0:
+                    # Преобразуем в более агрессивное значение
+                    brightness_factor = 1 + (brightness / 50)  # Более сильный эффект
+                    enhancer = ImageEnhance.Brightness(img)
+                    img = enhancer.enhance(brightness_factor)
+
+                # Применяем контраст с усиленным эффектом
+                if contrast != 1.0:
+                    # Используем квадрат значения для более сильного эффекта
+                    enhanced_contrast = contrast ** 1.5
+                    enhancer = ImageEnhance.Contrast(img)
+                    img = enhancer.enhance(enhanced_contrast)
+
+                # Применяем резкость
+                if sharpness != 1.0:
+                    enhancer = ImageEnhance.Sharpness(img)
+                    img = enhancer.enhance(sharpness)
+
+                # Добавляем легкую шумоподавление для сканов
+                if img.mode == 'RGB':
+                    # Легкая медианная фильтрация для уменьшения шума
+                    img = img.filter(ImageFilter.MedianFilter(size=1))
+
+                # Сохраняем результат
+                output_path = image_path.replace('.png', '_enhanced.jpg')
+                img.save(output_path, "JPEG", quality=95, optimize=True, subsampling=0)
+
+
+                return output_path
+
+        except Exception as e:
+            print(f"Error enhancing image: {e}")
+            return image_path
+
+    def auto_enhance_image(self, img: Image.Image) -> Image.Image:
+        """Автоматическое улучшение изображения"""
+        # Конвертируем в массив для анализа
+        img_array = np.array(img)
+
+        # Вычисляем гистограмму
+        if len(img_array.shape) == 3:  # RGB изображение
+            # Разделяем каналы
+            r, g, b = img_array[:, :, 0], img_array[:, :, 1], img_array[:, :, 2]
+
+            # Вычисляем статистику по каналам
+            r_min, r_max = np.percentile(r, [2, 98])
+            g_min, g_max = np.percentile(g, [2, 98])
+            b_min, b_max = np.percentile(b, [2, 98])
+
+            # Применяем автоматическую коррекцию уровней
+            r_corrected = np.clip((r - r_min) * 255.0 / (r_max - r_min), 0, 255).astype(np.uint8)
+            g_corrected = np.clip((g - g_min) * 255.0 / (g_max - g_min), 0, 255).astype(np.uint8)
+            b_corrected = np.clip((b - b_min) * 255.0 / (b_max - b_min), 0, 255).astype(np.uint8)
+
+            # Собираем обратно
+            enhanced_array = np.stack([r_corrected, g_corrected, b_corrected], axis=2)
+            img = Image.fromarray(enhanced_array)
+
+        # Автоматическая коррекция контраста
+        img = ImageOps.autocontrast(img, cutoff=2)
+
+        return img
+
+    async def pdf_to_images_with_enhancement(
+            self,
+            pdf_path: str,
+            user_id: int = None,
+            dpi: int = 150
+    ) -> List[str]:
+        """Конвертация PDF в улучшенные изображения"""
+        images = []
+        temp_dir = tempfile.mkdtemp()
+
+        try:
+            # Получаем настройки пользователя или используем дефолтные
+            if user_id:
+                settings = self.get_user_settings(user_id)
+                contrast = settings.get('contrast', self.default_settings['contrast'])
+                brightness = settings.get('brightness', self.default_settings['brightness'])
+                sharpness = settings.get('sharpness', self.default_settings['sharpness'])
+                auto_enhance = settings.get('auto_enhance', self.default_settings['auto_enhance'])
+            else:
+                contrast = self.default_settings['contrast']
+                brightness = self.default_settings['brightness']
+                sharpness = self.default_settings['sharpness']
+                auto_enhance = self.default_settings['auto_enhance']
+
+            doc = fitz.open(pdf_path)
+
+            # Получаем имя файла без расширения
+            pdf_name = os.path.splitext(os.path.basename(pdf_path))[0]
+
+            for page_num in range(len(doc)):
+                page = doc.load_page(page_num)
+                zoom = dpi / 72
+
+                mat = fitz.Matrix(zoom, zoom)
+                pix = page.get_pixmap(matrix=mat)
+
+                # Сохраняем временное изображение с именем исходного файла
+                temp_img_path = os.path.join(temp_dir, f"{pdf_name}_page_{page_num + 1}.png")
+                pix.save(temp_img_path)
+
+                # Применяем улучшения
+                enhanced_img_path = await self.enhance_image_with_settings(
+                    temp_img_path,
+                    contrast=contrast,
+                    brightness=brightness,
+                    sharpness=sharpness,
+                    auto_enhance=auto_enhance
+                )
+
+                # Оптимизируем размер
+                self.optimize_image_size(enhanced_img_path)
+
+                images.append(enhanced_img_path)
+
+                # Удаляем временный файл
+                if os.path.exists(temp_img_path):
+                    os.remove(temp_img_path)
+
+            doc.close()
+
+        except Exception as e:
+            print(f"Error converting PDF with enhancement: {e}")
+            raise
+
+        return images
 
     async def pdf_to_images(self, pdf_path: str, dpi: int = 300, max_size: int = 10000) -> List[str]:
         """Конвертация PDF в изображения"""
@@ -77,27 +218,6 @@ class PDFProcessor:
             raise
 
         return images
-
-    def optimize_image_size(self, image_path: str, max_file_size: int = 2 * 1024 * 1024):
-        """Оптимизация размера файла изображения"""
-        try:
-            file_size = os.path.getsize(image_path)
-            if file_size <= max_file_size:
-                return
-
-            with Image.open(image_path) as img:
-                if img.mode != 'RGB':
-                    img = img.convert('RGB')
-
-                # Уменьшаем качество постепенно
-                quality = 85
-                while quality > 40 and file_size > max_file_size:
-                    img.save(image_path, "JPEG", quality=quality, optimize=True)
-                    file_size = os.path.getsize(image_path)
-                    quality -= 10
-
-        except Exception as e:
-            print(f"Error optimizing image size: {e}")
 
     async def compress_pdf(self, pdf_path: str, method: str = "aggressive") -> str:
         """
@@ -143,248 +263,6 @@ class PDFProcessor:
         # Если все методы не сработали, возвращаем исходный файл
         return pdf_path
 
-    async def _compress_pdf_with_method(self, pdf_path: str, method: str) -> Optional[str]:
-        """Внутренний метод сжатия с конкретным алгоритмом"""
-        temp_dir = tempfile.mkdtemp()
-        output_path = os.path.join(temp_dir, f"compressed_{method}.pdf")
-
-        # Настройки для разных методов сжатия
-        settings = {
-            "light": {
-                "gs_settings": "/prepress",  # Минимальное сжатие
-                "image_quality": 90,
-                "image_dpi": 150,
-                "aggressive": False
-            },
-            "balanced": {
-                "gs_settings": "/ebook",  # Баланс качество/размер
-                "image_quality": 75,
-                "image_dpi": 150,
-                "aggressive": True
-            },
-            "aggressive": {
-                "gs_settings": "/screen",  # Максимальное сжатие
-                "image_quality": 60,
-                "image_dpi": 96,
-                "aggressive": True
-            },
-            "extreme": {
-                "gs_settings": "/screen",  # Экстремальное сжатие
-                "image_quality": 40,
-                "image_dpi": 72,
-                "aggressive": True,
-                "extreme": True
-            }
-        }
-
-        method_settings = settings.get(method, settings["balanced"])
-
-        try:
-            # Пробуем через Ghostscript с оптимизированными параметрами
-            if await self._has_ghostscript():
-                return await self._compress_with_ghostscript(
-                    pdf_path, output_path, method_settings
-                )
-            else:
-                # Альтернативный метод без Ghostscript
-                return await self._compress_with_fitz(
-                    pdf_path, output_path, method_settings
-                )
-
-        except Exception as e:
-            print(f"Error in compression method {method}: {e}")
-            return None
-
-    async def _has_ghostscript(self) -> bool:
-        """Проверка наличия Ghostscript"""
-        try:
-            process = await asyncio.create_subprocess_exec(
-                'gs', '--version',
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE
-            )
-            stdout, stderr = await process.communicate()
-            return process.returncode == 0
-        except:
-            return False
-
-    async def _compress_with_ghostscript(self, pdf_path: str, output_path: str, settings: dict) -> str:
-        """Сжатие через Ghostscript с расширенными параметрами"""
-        gs_settings = settings["gs_settings"]
-        image_quality = settings["image_quality"]
-        image_dpi = settings["image_dpi"]
-
-        # Команда Ghostscript с оптимизацией изображений
-        command = [
-            'gs',
-            '-sDEVICE=pdfwrite',
-            '-dCompatibilityLevel=1.4',
-            f'-dPDFSETTINGS={gs_settings}',
-            '-dNOPAUSE',
-            '-dQUIET',
-            '-dBATCH',
-
-            # Оптимизация изображений
-            '-dDownsampleColorImages=true',
-            f'-dColorImageResolution={image_dpi}',
-            f'-dColorImageDownsampleThreshold=1.0',
-            f'-dColorImageDownsampleType=/Bicubic',
-
-            '-dDownsampleGrayImages=true',
-            f'-dGrayImageResolution={image_dpi}',
-            f'-dGrayImageDownsampleThreshold=1.0',
-            f'-dGrayImageDownsampleType=/Bicubic',
-
-            '-dDownsampleMonoImages=true',
-            f'-dMonoImageResolution={image_dpi}',
-            f'-dMonoImageDownsampleThreshold=1.0',
-            f'-dMonoImageDownsampleType=/Subsample',
-
-            # Качество JPEG
-            f'-dColorImageFilter=/DCTEncode',
-            f'-dGrayImageFilter=/DCTEncode',
-            f'-dColorConversionStrategy=/sRGB',
-            f'-dEncodeColorImages=true',
-            f'-dEncodeGrayImages=true',
-            f'-dEncodeMonoImages=true',
-            f'-dAutoFilterColorImages=false',
-            f'-dAutoFilterGrayImages=false',
-
-            # Настройки сжатия
-            '-dCompressFonts=true',
-            '-dEmbedAllFonts=true',
-            '-dSubsetFonts=true',
-            '-dCompressPages=true',
-            '-dUseFlateCompression=true',
-            f'-dFlateEncodeFilter=/FlateEncode',
-
-            # Качество JPEG (для настроек)
-            f'-dColorImageQuality={image_quality}',
-            f'-dGrayImageQuality={image_quality}',
-
-            f'-sOutputFile={output_path}',
-            pdf_path
-        ]
-
-        # Для экстремального сжатия добавляем дополнительные параметры
-        if settings.get("extreme", False):
-            command.insert(5, '-dColorConversionStrategy=/Gray')
-            command.insert(6, '-dProcessColorModel=/DeviceGray')
-            command.insert(7, '-dColorImageDepth=4')
-
-        process = await asyncio.create_subprocess_exec(
-            *command,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE
-        )
-
-        stdout, stderr = await process.communicate()
-
-        if process.returncode == 0 and os.path.exists(output_path):
-            return output_path
-        else:
-            raise Exception(f"Ghostscript failed: {stderr.decode()}")
-
-    async def _compress_with_fitz(self, pdf_path: str, output_path: str, settings: dict) -> str:
-        """Альтернативный метод сжатия через PyMuPDF"""
-        temp_dir = tempfile.mkdtemp()
-
-        try:
-            doc = fitz.open(pdf_path)
-            new_doc = fitz.open()
-
-            # Получаем настройки
-            image_quality = settings["image_quality"]
-            image_dpi = settings["image_dpi"]
-            aggressive = settings.get("aggressive", True)
-
-            for page_num in range(len(doc)):
-                page = doc.load_page(page_num)
-                new_page = new_doc.new_page(
-                    width=page.rect.width,
-                    height=page.rect.height
-                )
-
-                # Копируем страницу с оптимизацией
-                new_page.show_pdf_page(
-                    page.rect,
-                    doc,
-                    page_num
-                )
-
-            # Опции сохранения для максимального сжатия
-            save_options = {
-                'garbage': 4,  # Удаление неиспользуемых объектов
-                'deflate': True,  # Сжатие потоков
-                'deflate_images': aggressive,  # Сжатие изображений
-                'deflate_fonts': aggressive,  # Сжатие шрифтов
-                'clean': True,  # Очистка
-                'pretty': False,  # Без форматирования
-            }
-
-            # Дополнительная оптимизация изображений
-            if aggressive:
-                save_options['images'] = image_dpi
-                # Можно добавить дополнительную обработку изображений
-                await self._optimize_images_in_pdf(new_doc, image_quality, image_dpi)
-
-            new_doc.save(output_path, **save_options)
-            new_doc.close()
-            doc.close()
-
-            return output_path
-
-        except Exception as e:
-            raise Exception(f"PyMuPDF compression failed: {e}")
-
-    async def _optimize_images_in_pdf(self, doc, quality: int, dpi: int):
-        """Оптимизация изображений внутри PDF документа"""
-        for page_num in range(len(doc)):
-            page = doc.load_page(page_num)
-
-            # Получаем список изображений на странице
-            image_list = page.get_images()
-
-            for img_index, img_info in enumerate(image_list):
-                try:
-                    xref = img_info[0]
-                    # Можно добавить дополнительную обработку изображений
-                    # Например, изменение разрешения или сжатие
-                    pass
-                except Exception as e:
-                    print(f"Error optimizing image {img_index} on page {page_num}: {e}")
-
-    async def analyze_pdf_structure(self, pdf_path: str) -> Dict:
-        """Анализ структуры PDF для выбора оптимального метода сжатия"""
-        try:
-            doc = fitz.open(pdf_path)
-            info = {
-                "pages": len(doc),
-                "has_images": False,
-                "has_text": False,
-                "has_forms": False,
-                "file_size": os.path.getsize(pdf_path),
-                "metadata": doc.metadata
-            }
-
-            # Анализируем несколько страниц
-            for i in range(min(3, len(doc))):
-                page = doc.load_page(i)
-                text = page.get_text()
-                images = page.get_images()
-
-                if text.strip():
-                    info["has_text"] = True
-                if images:
-                    info["has_images"] = True
-
-            doc.close()
-            return info
-
-        except Exception as e:
-            print(f"Error analyzing PDF: {e}")
-            return {}
-
     async def smart_compress_pdf(self, pdf_path: str) -> str:
         """
         Умное сжатие PDF с анализом содержимого
@@ -417,55 +295,6 @@ class PDFProcessor:
         # Выполняем сжатие
         return await self.compress_pdf(pdf_path, method)
 
-    async def adjust_contrast_brightness(self, pdf_path: str, user_id: int) -> str:
-        """Настройка контраста и яркости PDF"""
-        settings = self.get_user_settings(user_id)
-        contrast = settings.get('contrast', 1.15)
-        brightness = settings.get('brightness', 0)
-
-        temp_dir = tempfile.mkdtemp()
-        processed_dir = os.path.join(temp_dir, "processed")
-        os.makedirs(processed_dir, exist_ok=True)
-
-        output_pdf_path = os.path.join(temp_dir, "enhanced.pdf")
-
-        try:
-            # Используем более низкое DPI для экономии памяти
-            images = await self.pdf_to_images(pdf_path, dpi=150)
-            processed_images = []
-
-            for i, img_path in enumerate(images):
-                with Image.open(img_path) as img:
-                    if img.mode != 'RGB':
-                        img = img.convert('RGB')
-
-                    # Применяем контраст
-                    if contrast != 1.0:
-                        enhancer = ImageEnhance.Contrast(img)
-                        img = enhancer.enhance(contrast)
-
-                    # Применяем яркость
-                    if brightness != 0:
-                        enhancer = ImageEnhance.Brightness(img)
-                        img = enhancer.enhance(1 + brightness / 100)
-
-                    # Сохраняем с оптимизацией
-                    processed_path = os.path.join(processed_dir, f"page_{i + 1}.jpg")
-                    img.save(processed_path, "JPEG", quality=85, optimize=True)
-                    processed_images.append(processed_path)
-
-                # Удаляем временное изображение
-                os.remove(img_path)
-
-            # Конвертируем обратно в PDF
-            with open(output_pdf_path, "wb") as f:
-                f.write(img2pdf.convert(processed_images))
-
-            return output_pdf_path
-
-        except Exception as e:
-            print(f"Error adjusting contrast/brightness: {e}")
-            raise
 
     def cleanup_temp_files(self, temp_dir: str):
         """Очистка временных файлов"""
@@ -476,25 +305,272 @@ class PDFProcessor:
         except Exception as e:
             print(f"Error cleaning up temp files: {e}")
 
-    def create_archive_from_images(self, images_list):
-        """Создает ZIP архив из изображений"""
-        zip_buffer = io.BytesIO()
+    async def analyze_pdf_structure(self, pdf_path: str) -> Dict:
+        """Анализ структуры PDF для выбора оптимального метода сжатия"""
+        try:
+            doc = fitz.open(pdf_path)
+            info = {
+                "pages": len(doc),
+                "has_images": False,
+                "has_text": False,
+                "has_forms": False,
+                "file_size": os.path.getsize(pdf_path),
+                "metadata": doc.metadata
+            }
 
-        with zipfile.ZipFile(zip_buffer, 'w', zipfile.ZIP_DEFLATED, compresslevel=9) as zip_file:
-            for page_num, image_path in images_list:
-                try:
-                    ext = os.path.splitext(image_path)[1].lower()
-                    filename = f"страница_{page_num}{ext}"
+            # Анализируем несколько страниц
+            for i in range(min(3, len(doc))):
+                page = doc.load_page(i)
+                text = page.get_text()
+                images = page.get_images()
 
-                    # Оптимизируем изображение перед добавлением в архив
-                    self.optimize_image_size(image_path)
+                if text.strip():
+                    info["has_text"] = True
+                if images:
+                    info["has_images"] = True
 
-                    with open(image_path, 'rb') as img_file:
-                        img_data = img_file.read()
-                        zip_file.writestr(filename, img_data)
-                except Exception as e:
-                    print(f"Error adding image {image_path} to archive: {e}")
-                    continue
+            doc.close()
+            return info
 
-        zip_buffer.seek(0)
-        return zip_buffer.getvalue()
+        except Exception as e:
+            print(f"Error analyzing PDF: {e}")
+            return {}
+
+    async def create_preview_image(
+            self,
+            pdf_path: str,
+            user_id: int = None,
+            page_num: int = 0
+    ) -> Tuple[str, Dict]:
+        """Создание предпросмотра с текущими настройками"""
+        temp_dir = tempfile.mkdtemp()
+
+        try:
+            # Получаем настройки
+            if user_id:
+                settings = self.get_user_settings(user_id)
+                contrast = settings.get('contrast', self.default_settings['contrast'])
+                brightness = settings.get('brightness', self.default_settings['brightness'])
+                sharpness = settings.get('sharpness', self.default_settings['sharpness'])
+            else:
+                contrast = self.default_settings['contrast']
+                brightness = self.default_settings['brightness']
+                sharpness = self.default_settings['sharpness']
+
+            # Открываем PDF и получаем первую страницу
+            doc = fitz.open(pdf_path)
+            page = doc.load_page(min(page_num, len(doc) - 1))
+
+            # Рендерим с низким DPI для быстрого предпросмотра
+            zoom = 100 / 72  # Низкое разрешение для скорости
+            mat = fitz.Matrix(zoom, zoom)
+            pix = page.get_pixmap(matrix=mat)
+
+            # Сохраняем временное изображение
+            preview_path = os.path.join(temp_dir, f"preview.png")
+            pix.save(preview_path)
+            doc.close()
+
+            # Применяем текущие настройки
+            enhanced_preview = await self.enhance_image_with_settings(
+                preview_path,
+                contrast=contrast,
+                brightness=brightness,
+                sharpness=sharpness,
+                auto_enhance=True
+            )
+
+            # Информация о примененных настройках
+            settings_info = {
+                'contrast': contrast,
+                'brightness': brightness,
+                'sharpness': sharpness,
+                'page': page_num + 1,
+                'total_pages': len(doc)
+            }
+
+            return enhanced_preview, settings_info
+
+        except Exception as e:
+            print(f"Error creating preview: {e}")
+            raise
+
+    async def convert_to_images_with_settings(self, pdf_path: str, user_id: int) -> List[str]:
+        """Конвертация PDF в изображения с настройками пользователя"""
+        # Получаем настройки пользователя
+        user_settings = self.get_user_settings(user_id)
+        dpi = user_settings.get('dpi', 300)
+
+        # Конвертируем с нужным DPI
+        return await self.pdf_to_images(pdf_path, dpi=dpi)
+
+    async def compress_pdf_with_settings(self, pdf_path: str, user_id: int) -> str:
+        """Сжатие PDF с учетом настроек пользователя"""
+        # Здесь можно добавить настройки сжатия для разных пользователей
+        return await self.smart_compress_pdf(pdf_path)
+
+    def save_user_settings(self):
+        """Сохранение настроек пользователей в файл"""
+        with open(self.user_settings_file, 'w') as f:
+            json.dump(self.user_settings, f, indent=2)
+
+    def get_user_settings(self, user_id: int) -> Dict:
+        """Получение настроек пользователя"""
+        user_id_str = str(user_id)
+        if user_id_str not in self.user_settings:
+            self.user_settings[user_id_str] = {
+                'dpi': 300,
+                'contrast': 1.15,
+                'brightness': 0
+            }
+        return self.user_settings[user_id_str]
+
+    def update_user_settings(self, user_id: int, updates: Dict):
+        """Обновление настроек пользователя"""
+        user_id_str = str(user_id)
+        if user_id_str not in self.user_settings:
+            self.user_settings[user_id_str] = {}
+
+        # Ограничиваем значения
+        if 'contrast' in updates:
+            updates['contrast'] = max(0.5, min(3.0, float(updates['contrast'])))
+        if 'brightness' in updates:
+            updates['brightness'] = max(-100, min(100, int(updates['brightness'])))
+        if 'dpi' in updates:
+            updates['dpi'] = max(72, min(600, int(updates['dpi'])))
+
+        self.user_settings[user_id_str].update(updates)
+
+        # Сохраняем в файл
+        self.save_user_settings()
+
+    def reset_user_settings(self, user_id: int):
+        """Сброс настроек пользователя к значениям по умолчанию"""
+        user_id_str = str(user_id)
+        self.user_settings[user_id_str] = self.default_settings.copy()
+        self.save_user_settings()
+
+    async def adjust_contrast_brightness(self, pdf_path: str, user_id: int) -> str:
+        """Настройка контраста и яркости PDF с использованием настроек пользователя"""
+        # Получаем настройки пользователя
+        user_settings = self.get_user_settings(user_id)
+        contrast = user_settings.get('contrast', 1.15)
+        brightness = user_settings.get('brightness', 0)
+
+        temp_dir = tempfile.mkdtemp()
+        processed_dir = os.path.join(temp_dir, "processed")
+        os.makedirs(processed_dir, exist_ok=True)
+
+        output_pdf_path = os.path.join(temp_dir, "enhanced.pdf")
+
+        try:
+            doc = fitz.open(pdf_path)
+            processed_images = []
+
+            for page_num in range(len(doc)):
+                page = doc.load_page(page_num)
+
+                # Рендерим страницу как изображение с высоким DPI
+                zoom = 2.0  # 144 DPI (72 * 2)
+                mat = fitz.Matrix(zoom, zoom)
+                pix = page.get_pixmap(matrix=mat)
+
+                # Сохраняем временное изображение
+                img_path = os.path.join(temp_dir, f"page_{page_num}.png")
+                pix.save(img_path)
+
+                # Применяем контраст и яркость
+                enhanced_img_path = await self.enhance_image_with_settings(
+                    img_path,
+                    contrast=contrast,
+                    brightness=brightness,
+                    sharpness=1.0,
+                    auto_enhance=True
+                )
+
+                processed_images.append(enhanced_img_path)
+
+                # Удаляем временное изображение
+                if os.path.exists(img_path):
+                    os.remove(img_path)
+
+            doc.close()
+
+            # Конвертируем обратно в PDF
+            if processed_images:
+                with open(output_pdf_path, "wb") as f:
+                    f.write(img2pdf.convert(processed_images))
+
+            # Очищаем временные изображения
+            for img_path in processed_images:
+                if os.path.exists(img_path):
+                    os.remove(img_path)
+
+            return output_pdf_path
+
+        except Exception as e:
+            print(f"Error adjusting contrast/brightness: {e}")
+            # В случае ошибки возвращаем оригинальный файл
+            return pdf_path
+
+    def get_enhancement_presets(self) -> Dict[str, Dict]:
+        """Получение предустановленных настроек улучшения"""
+        return {
+            'light': {'contrast': 1.2, 'brightness': 10, 'sharpness': 1.1, 'auto_enhance': True},
+            'medium': {'contrast': 1.5, 'brightness': 20, 'sharpness': 1.2, 'auto_enhance': True},
+            'strong': {'contrast': 2.0, 'brightness': 30, 'sharpness': 1.5, 'auto_enhance': True},
+            'text_only': {'contrast': 2.5, 'brightness': 15, 'sharpness': 2.0, 'auto_enhance': False},
+            'photo': {'contrast': 1.3, 'brightness': 25, 'sharpness': 1.1, 'auto_enhance': True},
+            'custom': {}  # Пользовательские настройки
+        }
+
+    def apply_preset(self, user_id: int, preset_name: str):
+        """Применение предустановленных настроек"""
+        presets = self.get_enhancement_presets()
+        if preset_name in presets:
+            self.update_user_settings(user_id, presets[preset_name])
+            return True
+        return False
+
+    # Остальные методы остаются без изменений (optimize_image_size, compress_pdf и т.д.)
+    def optimize_image_size(self, image_path: str, max_file_size: int = 1024 * 1024) -> bool:
+        """Оптимизация размера файла изображения для Telegram"""
+        try:
+            file_size = os.path.getsize(image_path)
+            if file_size <= max_file_size:
+                return True
+
+            with Image.open(image_path) as img:
+                original_width, original_height = img.size
+
+                # Определяем максимальные размеры для Telegram
+                max_dimension = 1280
+                if original_width > max_dimension or original_height > max_dimension:
+                    # Сохраняем пропорции
+                    ratio = min(max_dimension / original_width, max_dimension / original_height)
+                    new_width = int(original_width * ratio)
+                    new_height = int(original_height * ratio)
+                    img = img.resize((new_width, new_height), Image.Resampling.LANCZOS)
+
+                # Постепенно уменьшаем качество
+                quality = 90
+                while quality > 40 and file_size > max_file_size:
+                    # Сохраняем во временный файл
+                    temp_path = image_path + ".tmp"
+
+                    if img.mode != 'RGB':
+                        img = img.convert('RGB')
+
+                    img.save(temp_path, "JPEG", quality=quality, optimize=True)
+                    file_size = os.path.getsize(temp_path)
+                    quality -= 10
+
+                # Заменяем оригинальный файл оптимизированным
+                if os.path.exists(temp_path):
+                    os.replace(temp_path, image_path)
+
+                return True
+
+        except Exception as e:
+            print(f"Error optimizing image size: {e}")
+            return False

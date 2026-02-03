@@ -24,14 +24,14 @@ os.makedirs("temp_files", exist_ok=True)
 os.makedirs("processed_files", exist_ok=True)
 
 # Настройки сессии с увеличенными таймаутами
-session = AiohttpSession(
-    api=TelegramAPIServer.from_base("http://localhost:8081", is_local=True),
-)
+# session = AiohttpSession(
+#     api=TelegramAPIServer.from_base("http://localhost:8081", is_local=True),
+# )
 
 # Инициализация бота с увеличенными таймаутами
 bot = Bot(
     token=Config.BOT_TOKEN,
-    session=session,
+    # session=session,
     timeout=1800,  # Увеличили до 30 минут
 )
 
@@ -195,9 +195,14 @@ async def handle_pdf(message: Message, state: FSMContext):
         file = await bot.get_file(file_id)
         file_path = file.file_path
 
-        # Сохраняем временный файл
+        # Сохраняем оригинальное имя файла
+        original_name = message.document.file_name
+        # Убираем расширение .pdf для дальнейшего использования
+        file_base_name = Path(original_name).stem
+
+        # Сохраняем временный файл с оригинальным именем
         temp_dir = tempfile.mkdtemp()
-        input_pdf_path = os.path.join(temp_dir, f"input_{file_id}.pdf")
+        input_pdf_path = os.path.join(temp_dir, original_name)  # Используем оригинальное имя
         await bot.download_file(file_path, input_pdf_path)
 
         # Сохраняем информацию о файле в состоянии
@@ -205,11 +210,12 @@ async def handle_pdf(message: Message, state: FSMContext):
             input_pdf_path=input_pdf_path,
             temp_dir=temp_dir,
             file_id=file_id,
-            original_file_name=message.document.file_name
+            original_file_name=original_name,
+            file_base_name=file_base_name  # Сохраняем имя без расширения
         )
 
         await message.answer(
-            f"✅ PDF файл получен: <b>{message.document.file_name}</b>\n"
+            f"✅ PDF файл получен: <b>{original_name}</b>\n"
             f"📄 Размер: {message.document.file_size / 1024:.1f} КБ\n\n"
             "Выберите действие:",
             parse_mode="HTML",
@@ -229,102 +235,148 @@ async def process_images(callback: CallbackQuery, state: FSMContext):
     data = await state.get_data()
     input_pdf_path = data.get('input_pdf_path')
     original_name = data.get('original_file_name', 'document')
+    file_base_name = data.get('file_base_name', Path(original_name).stem)
     temp_dir = data.get('temp_dir')
 
     try:
         # Создаем прогресс-сообщение
         progress_msg = await callback.message.edit_text("🔄 Преобразую PDF в изображения...")
 
-        # Получаем настройки качества
-        user_settings = pdf_processor.get_user_settings(callback.from_user.id)
-        dpi = user_settings.get('dpi', 300)
-
-        # Конвертируем в изображения
-        images = await pdf_processor.pdf_to_images(input_pdf_path, dpi=dpi)
+        # Используем настройки пользователя
+        images = await pdf_processor.convert_to_images_with_settings(
+            input_pdf_path,
+            callback.from_user.id
+        )
 
         if not images:
             await progress_msg.edit_text("❌ Не удалось преобразовать PDF в изображения.")
             return
 
-        await progress_msg.edit_text(f"✅ Создано {len(images)} изображений\n📦 Подготавливаю архив...")
+        await progress_msg.edit_text(f"✅ Создано {len(images)} изображений\n📤 Отправляю...")
 
-        # Создаем список всех изображений для архива
-        images_list = [(i, img_path) for i, img_path in enumerate(images, 1)]
+        # Отправляем изображения группами
+        await send_images_in_albums(callback.message, images, file_base_name)
 
-        # Создаем один архив со всеми изображениями
-        archive_bytes = pdf_processor.create_archive_from_images(images_list)
-
-        # Отправляем один архив
-        archive_name = f"{Path(original_name).stem}_images.zip"
-
-        # Если архив меньше 45MB, отправляем как есть
-        await progress_msg.edit_text(f"📤 Отправляю архив ({len(archive_bytes) / 1024 / 1024:.1f} MB)...")
-
-        # Используем отдельную задачу для отправки
-        asyncio.create_task(send_document_with_retry(
-            callback.message,
-            archive_bytes,
-            archive_name,
-            f"📁 Все изображения ({len(images)} страниц)"
-        ))
-
-        # Удаляем сообщение о прогрессе через 2 секунды
-        await asyncio.sleep(2)
+        # Удаляем сообщение о прогрессе
         await progress_msg.delete()
 
-        await cleanup_images_and_temp(images, temp_dir)
+        # Очистка временных файлов
+        pdf_processor.cleanup_temp_files(temp_dir)
 
     except Exception as e:
-        pass
+        logger.error(f"Error converting PDF to images: {e}")
+        await callback.message.answer("❌ Произошла ошибка при конвертации PDF.")
 
-
-async def send_document_with_retry(message, file_bytes, filename, caption, max_retries=1):
-    """Отправка документа с повторными попытками"""
-    for attempt in range(max_retries):
-        try:
-            await message.answer_document(
-                types.BufferedInputFile(
-                    file_bytes,
-                    filename=filename
-                ),
-                caption=caption
-            )
-            return True
-        except Exception as e:
-            logger.error(f"ОШИБКА {attempt + 1}/{max_retries}): {e}")
-    return False
-
-
-async def cleanup_images_and_temp(images, temp_dir):
-    """Очистка временных файлов"""
+async def send_images_in_albums(message: Message, images: list, file_base_name: str):
+    """Отправка изображений альбомами по 10 штук"""
     try:
-        # Удаляем изображения
-        for image_path in images:
-            if os.path.exists(image_path):
-                try:
-                    os.remove(image_path)
-                except:
-                    pass
+        # Разбиваем изображения на группы по 10 (максимум для медиагруппы в Telegram)
+        chunk_size = 10
+        for i in range(0, len(images), chunk_size):
+            chunk = images[i:i + chunk_size]
 
-        # Удаляем временную директорию
-        if os.path.exists(temp_dir):
-            for root, dirs, files in os.walk(temp_dir, topdown=False):
-                for name in files:
-                    try:
-                        os.remove(os.path.join(root, name))
-                    except:
-                        pass
-                for name in dirs:
-                    try:
-                        os.rmdir(os.path.join(root, name))
-                    except:
-                        pass
-            try:
-                os.rmdir(temp_dir)
-            except:
-                pass
+            # Создаем медиагруппу
+            media_group = []
+
+            for j, image_path in enumerate(chunk, 1):
+                page_num = i + j
+                # Используем оригинальное имя файла + номер страницы
+                caption = f"📄 {file_base_name}"
+
+                # Оптимизируем размер изображения для Telegram
+                pdf_processor.optimize_image_size(image_path, max_file_size=1024 * 1024)  # 1MB максимум
+
+                with open(image_path, 'rb') as img_file:
+                    media_group.append(
+                        types.InputMediaPhoto(
+                            media=types.BufferedInputFile(
+                                img_file.read(),
+                                filename=f"{file_base_name}_страница_{page_num}.jpg"  # Используем оригинальное имя
+                            ),
+                            caption=caption if caption else None
+                        )
+                    )
+
+            # Отправляем альбом
+            await message.answer_media_group(media_group)
+
+            # Небольшая задержка между альбомами чтобы не превысить лимиты
+            if i + chunk_size < len(images):
+                await asyncio.sleep(1)
+
     except Exception as e:
-        logger.error(f"Error cleaning up files: {e}")
+        logger.error(f"Error sending images: {e}")
+        # Пробуем отправить по одному если групповой отправка не работает
+        await send_images_one_by_one(message, images, file_base_name)
+
+
+async def send_images_one_by_one(message: Message, images: list, file_base_name: str):
+    """Отправка изображений по одному (запасной вариант)"""
+    for i, image_path in enumerate(images, 1):
+        try:
+            pdf_processor.optimize_image_size(image_path, max_file_size=1024 * 1024)
+
+            with open(image_path, 'rb') as img_file:
+                await message.answer_photo(
+                    types.BufferedInputFile(
+                        img_file.read(),
+                        filename=f"{file_base_name}_страница_{i}.jpg"  # Используем оригинальное имя
+                    ),
+                    caption=f"📄 {file_base_name}"
+                )
+
+            await asyncio.sleep(0.5)  # Пауза между отправками
+
+        except Exception as e:
+            logger.error(f"Error sending image {i}: {e}")
+            continue
+# async def send_document_with_retry(message, file_bytes, filename, caption, max_retries=1):
+#     """Отправка документа с повторными попытками"""
+#     for attempt in range(max_retries):
+#         try:
+#             await message.answer_document(
+#                 types.BufferedInputFile(
+#                     file_bytes,
+#                     filename=filename
+#                 ),
+#                 caption=caption
+#             )
+#             return True
+#         except Exception as e:
+#             logger.error(f"ОШИБКА {attempt + 1}/{max_retries}): {e}")
+#     return False
+#
+#
+# async def cleanup_images_and_temp(images, temp_dir):
+#     """Очистка временных файлов"""
+#     try:
+#         # Удаляем изображения
+#         for image_path in images:
+#             if os.path.exists(image_path):
+#                 try:
+#                     os.remove(image_path)
+#                 except:
+#                     pass
+#
+#         # Удаляем временную директорию
+#         if os.path.exists(temp_dir):
+#             for root, dirs, files in os.walk(temp_dir, topdown=False):
+#                 for name in files:
+#                     try:
+#                         os.remove(os.path.join(root, name))
+#                     except:
+#                         pass
+#                 for name in dirs:
+#                     try:
+#                         os.rmdir(os.path.join(root, name))
+#                     except:
+#                         pass
+#             try:
+#                 os.rmdir(temp_dir)
+#             except:
+#                 pass
+#     except Exception as e:
+#         logger.error(f"Error cleaning up files: {e}")
 
 
 @dp.callback_query(F.data == "action_compress")
@@ -334,7 +386,8 @@ async def process_compress(callback: CallbackQuery, state: FSMContext):
 
     data = await state.get_data()
     input_pdf_path = data.get('input_pdf_path')
-    original_name = data.get('original_file_name', 'document')
+    original_name = data.get('original_file_name', 'document.pdf')
+    file_base_name = data.get('file_base_name', Path(original_name).stem)
 
     try:
         progress_msg = await callback.message.edit_text("🔍 Анализирую структуру PDF...")
@@ -345,8 +398,11 @@ async def process_compress(callback: CallbackQuery, state: FSMContext):
         await progress_msg.edit_text(
             f"📊 Исходный размер: {original_size / 1024 / 1024:.2f} MB\n🔄 Начинаю сжатие...")
 
-        # Используем умное сжатие
-        compressed_path = await pdf_processor.smart_compress_pdf(input_pdf_path)
+        # Используем сжатие с настройками пользователя
+        compressed_path = await pdf_processor.compress_pdf_with_settings(
+            input_pdf_path,
+            callback.from_user.id
+        )
 
         # Получаем размер после сжатия
         compressed_size = os.path.getsize(compressed_path)
@@ -369,10 +425,10 @@ async def process_compress(callback: CallbackQuery, state: FSMContext):
         else:
             result_message += "\n\n🎉 Отличное сжатие!"
 
-        # Отправляем сжатый файл
+        # Отправляем сжатый файл с оригинальным именем
         compressed_file = FSInputFile(
             compressed_path,
-            filename=f"compressed_{original_name}"
+            filename=f"{file_base_name}_сжатый.pdf"  # Используем оригинальное имя
         )
 
         await progress_msg.delete()
@@ -387,8 +443,49 @@ async def process_compress(callback: CallbackQuery, state: FSMContext):
         pdf_processor.cleanup_temp_files(data.get('temp_dir'))
 
     except Exception as e:
-        pass
+        logger.error(f"Error compressing PDF: {e}")
+        await callback.message.answer("❌ Произошла ошибка при сжатии PDF.")
 
+
+@dp.callback_query(F.data == "apply_contrast")
+async def apply_contrast(callback: CallbackQuery, state: FSMContext):
+    """Применение настроек контраста/яркости к PDF"""
+    await callback.answer()
+
+    data = await state.get_data()
+    input_pdf_path = data.get('input_pdf_path')
+    original_name = data.get('original_file_name', 'document.pdf')
+    file_base_name = data.get('file_base_name', Path(original_name).stem)
+
+    try:
+        progress_msg = await callback.message.edit_text("🎨 Применяю настройки контраста и яркости...")
+
+        # Применяем настройки контраста и яркости
+        enhanced_pdf_path = await pdf_processor.adjust_contrast_brightness(
+            input_pdf_path,
+            callback.from_user.id
+        )
+
+        # Отправляем обработанный файл с оригинальным именем
+        enhanced_file = FSInputFile(
+            enhanced_pdf_path,
+            filename=f"{file_base_name}_улучшенный.pdf"  # Используем оригинальное имя
+        )
+
+        await progress_msg.delete()
+        await callback.message.answer_document(
+            enhanced_file,
+            caption="✅ PDF файл обработан с настройками контраста и яркости"
+        )
+
+        # Очищаем временные файлы
+        if os.path.exists(enhanced_pdf_path):
+            os.remove(enhanced_pdf_path)
+        pdf_processor.cleanup_temp_files(data.get('temp_dir'))
+
+    except Exception as e:
+        logger.error(f"Error applying contrast/brightness: {e}")
+        await callback.message.answer("❌ Произошла ошибка при обработке PDF.")
 
 @dp.callback_query(F.data == "action_contrast")
 async def process_contrast(callback: CallbackQuery, state: FSMContext):
@@ -420,7 +517,8 @@ async def apply_contrast(callback: CallbackQuery, state: FSMContext):
 
     data = await state.get_data()
     input_pdf_path = data.get('input_pdf_path')
-    original_name = data.get('original_file_name', 'document')
+    original_name = data.get('original_file_name', 'document.pdf')
+    file_base_name = data.get('file_base_name', Path(original_name).stem)
 
     try:
         progress_msg = await callback.message.edit_text("🎨 Применяю настройки контраста и яркости...")
@@ -431,10 +529,10 @@ async def apply_contrast(callback: CallbackQuery, state: FSMContext):
             callback.from_user.id
         )
 
-        # Отправляем обработанный файл
+        # Отправляем обработанный файл с оригинальным именем
         enhanced_file = FSInputFile(
             enhanced_pdf_path,
-            filename=f"enhanced_{original_name}"
+            filename=f"{file_base_name}_улучшенный.pdf"  # Используем оригинальное имя
         )
 
         await progress_msg.delete()
@@ -449,7 +547,8 @@ async def apply_contrast(callback: CallbackQuery, state: FSMContext):
         pdf_processor.cleanup_temp_files(data.get('temp_dir'))
 
     except Exception as e:
-        pass
+        logger.error(f"Error applying contrast/brightness: {e}")
+        await callback.message.answer("❌ Произошла ошибка при обработке PDF.")
 
 @dp.callback_query(F.data == "action_settings")
 async def process_settings(callback: CallbackQuery):
