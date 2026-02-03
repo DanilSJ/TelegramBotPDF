@@ -190,7 +190,7 @@ async def handle_pdf(message: Message, state: FSMContext):
 
     try:
         await state.set_state(UserStates.waiting_for_action)
-
+        await message.answer("Начал скачивание")
         # Скачиваем файл
         file_id = message.document.file_id
         file = await bot.get_file(file_id)
@@ -222,7 +222,7 @@ async def handle_pdf(message: Message, state: FSMContext):
 
     except Exception as e:
         logger.error(f"Error processing PDF: {e}")
-        await message.answer("❌ Произошла ошибка при обработке файла. Попробуйте еще раз.")
+        await message.answer("❌ Произошла ошибка при обработке файла. Большой файл.")
 
 @dp.callback_query(F.data == "action_images")
 async def process_images(callback: CallbackQuery, state: FSMContext):
@@ -254,15 +254,11 @@ async def process_images(callback: CallbackQuery, state: FSMContext):
         # Отправляем изображения группами
         await send_images_in_albums(callback.message, images, file_base_name)
 
-        # Удаляем сообщение о прогрессе
-        await progress_msg.delete()
-
         # Очистка временных файлов
         pdf_processor.cleanup_temp_files(temp_dir)
 
     except Exception as e:
-        logger.error(f"Error converting PDF to images: {e}")
-        await callback.message.answer("❌ Произошла ошибка при конвертации PDF.")
+        pass
 
 
 async def send_images_in_albums(message: Message, images: list, original_name: str):
@@ -430,7 +426,6 @@ async def process_compress(callback: CallbackQuery, state: FSMContext):
             filename=original_name  # Отправляем с оригинальным именем
         )
 
-        await progress_msg.delete()
         await callback.message.answer_document(
             compressed_file,
             caption=result_message
@@ -499,7 +494,6 @@ async def apply_contrast(callback: CallbackQuery, state: FSMContext):
             filename=original_name  # Отправляем с оригинальным именем
         )
 
-        await progress_msg.delete()
         await callback.message.answer_document(
             compressed_file,
             caption=f"✅ PDF файл обработан с настройками контраста и яркости{size_info}",
@@ -514,8 +508,7 @@ async def apply_contrast(callback: CallbackQuery, state: FSMContext):
         pdf_processor.cleanup_temp_files(data.get('temp_dir'))
 
     except Exception as e:
-        logger.error(f"Error applying contrast and compression: {e}")
-        await callback.message.answer("❌ Произошла ошибка при обработке файла.")
+        pass
 
 @dp.callback_query(F.data == "action_contrast")
 async def process_contrast(callback: CallbackQuery, state: FSMContext):
