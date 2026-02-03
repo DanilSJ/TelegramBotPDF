@@ -293,7 +293,10 @@ async def send_document_with_retry(message, file_bytes, filename, caption, max_r
     """Отправка документа с повторными попытками"""
     for attempt in range(max_retries):
         try:
-            await message.answer_document(FSInputFile(filename))
+            await bot.send_document(
+                chat_id=message.from_user.id,
+                document=FSInputFile(filename),
+            )
             return True
         except Exception as e:
             logger.error(f"Error sending document (attempt {attempt + 1}/{max_retries}): {e}")
