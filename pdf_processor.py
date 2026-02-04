@@ -9,7 +9,7 @@ from PIL import Image, ImageEnhance, ImageOps, ImageFilter
 import img2pdf
 import json
 import numpy as np
-
+import cv2
 
 class PDFProcessor:
     def __init__(self):
@@ -244,58 +244,50 @@ class PDFProcessor:
     async def enhance_image_with_settings(
             self,
             image_path: str,
-            contrast: float = 1.15,
-            brightness: float = 0,
+            contrast: float = 1.15,  # alpha
+            brightness: float = 0,  # beta
             sharpness: float = 1.0,
             auto_enhance: bool = True
     ) -> str:
-        """Улучшение изображения с настройками яркости и контраста"""
+
         try:
-            with Image.open(image_path) as img:
-                # Конвертируем в RGB если нужно
-                if img.mode != 'RGB':
-                    img = img.convert('RGB')
+            # Загружаем через OpenCV
+            img = cv2.imread(image_path)
 
-                # Автоулучшение
-                if auto_enhance:
-                    img = self.auto_enhance_image(img)
+            if img is None:
+                return image_path
 
-                # 1. Яркость
-                if brightness != 0:
-                    brightness_factor = 1 + (brightness / 100)
-                    enhancer = ImageEnhance.Brightness(img)
-                    img = enhancer.enhance(brightness_factor)
+            # OpenCV читает BGR — переводим в RGB если надо
+            img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
 
-                # 2. Контраст
-                if contrast != 1.0:
-                    enhancer = ImageEnhance.Contrast(img)
-                    img = enhancer.enhance(contrast)
+            # AUTO ENHANCE (простая нормализация)
+            if auto_enhance:
+                img = cv2.normalize(img, None, 0, 255, cv2.NORM_MINMAX)
 
-                # 3. Резкость (опционально)
-                if sharpness != 1.0:
-                    enhancer = ImageEnhance.Sharpness(img)
-                    img = enhancer.enhance(sharpness)
+            # === ЯРКОСТЬ + КОНТРАСТ ===
+            # contrast = alpha
+            # brightness = beta
+            img = cv2.convertScaleAbs(
+                img,
+                alpha=float(contrast),
+                beta=int(brightness)
+            )
 
-                # Сохраняем результат
-                output_path = image_path.replace('.png', '_enhanced.jpg')
+            # обратно в BGR для сохранения
+            img = cv2.cvtColor(img, cv2.COLOR_RGB2BGR)
 
-                # Определяем качество сохранения
-                if abs(brightness) > 30 or contrast > 1.5:
-                    quality = 70  # Немного ниже качество при сильных изменениях
-                else:
-                    quality = 85  # Высокое качество для нормальных настроек
+            output_path = image_path.replace(".png", "_enhanced.jpg")
 
-                img.save(output_path, "JPEG", quality=quality, optimize=True)
+            cv2.imwrite(
+                output_path,
+                img,
+            )
 
-                # Удаляем оригинальный файл если это временный
-                if output_path != image_path and os.path.exists(image_path):
-                    os.remove(image_path)
-
-                return output_path
+            return output_path
 
         except Exception as e:
-            logger.error(f"Error enhancing image: {e}")
-            return image_path  # Возвращаем оригинал в случае ошибки
+            print("OpenCV enhance error:", e)
+            return image_path
 
     def _apply_extreme_brightness(self, img: Image.Image, brightness: float) -> Image.Image:
         """Применение экстремальной яркости"""
@@ -459,7 +451,6 @@ class PDFProcessor:
             doc.close()
 
         except Exception as e:
-            logger.error(f"Error converting PDF to images: {e}")
             raise
 
         return images
@@ -577,7 +568,6 @@ class PDFProcessor:
             doc.close()
 
         except Exception as e:
-            logger.error(f"Error converting PDF with enhancement: {e}")
             # Пробуем базовый метод как запасной вариант
             images = await self.pdf_to_images(pdf_path, dpi=dpi)
 
@@ -622,7 +612,6 @@ class PDFProcessor:
             doc.close()
 
         except Exception as e:
-            logger.error(f"Error converting PDF to images: {e}")
             raise
 
         return images

@@ -24,14 +24,14 @@ os.makedirs("temp_files", exist_ok=True)
 os.makedirs("processed_files", exist_ok=True)
 
 # Настройки сессии с увеличенными таймаутами
-session = AiohttpSession(
-    api=TelegramAPIServer.from_base("http://localhost:8081", is_local=True),
-)
+# session = AiohttpSession(
+#     api=TelegramAPIServer.from_base("http://localhost:8081", is_local=True),
+# )
 
 # Инициализация бота с увеличенными таймаутами
 bot = Bot(
     token=Config.BOT_TOKEN,
-    session=session,
+    # session=session,
     timeout=1800,  # Увеличили до 30 минут
 )
 
@@ -479,51 +479,22 @@ async def apply_contrast(callback: CallbackQuery, state: FSMContext):
             original_name  # Передаем оригинальное имя
         )
 
-        # Шаг 2: Сжимаем полученный PDF
-        await progress_msg.edit_text("🎨 Применяю настройки контраста и яркости...\n\n⚡ Далее будет сжатие файла...")
-
-        # Сжимаем улучшенный PDF
-        compressed_pdf_path = await pdf_processor.compress_pdf_with_enhancement(
-            enhanced_pdf_path,
-            callback.from_user.id
-        )
-
-        # Получаем информацию о размерах
-        original_size = os.path.getsize(input_pdf_path)
-        enhanced_size = os.path.getsize(enhanced_pdf_path) if os.path.exists(enhanced_pdf_path) else original_size
-        compressed_size = os.path.getsize(compressed_pdf_path)
-
-        # Формируем информационное сообщение
-        size_info = (
-            f"\n\n📊 <b>Информация о размерах:</b>\n"
-            f"• Исходный: {original_size / 1024:.0f} KB\n"
-            f"• После улучшения: {enhanced_size / 1024:.0f} KB\n"
-            f"• После сжатия: {compressed_size / 1024:.0f} KB\n"
-        )
-
-        if compressed_size < original_size:
-            savings = ((original_size - compressed_size) / original_size * 100)
-            size_info += f"• Экономия: <b>{savings:.1f}%</b> 🎉"
-        else:
-            size_info += "• Файл уже оптимизирован"
 
         # Отправляем сжатый файл с оригинальным именем
         compressed_file = FSInputFile(
-            compressed_pdf_path,
+            enhanced_pdf_path,
             filename=original_name  # Отправляем с оригинальным именем
         )
 
         await callback.message.answer_document(
             compressed_file,
-            caption=f"✅ PDF файл обработан с настройками контраста и яркости{size_info}",
+            caption=f"✅ PDF файл обработан с настройками контраста и яркости",
             parse_mode="HTML"
         )
 
         # Очищаем временные файлы
         if os.path.exists(enhanced_pdf_path) and enhanced_pdf_path != input_pdf_path:
             os.remove(enhanced_pdf_path)
-        if os.path.exists(compressed_pdf_path) and compressed_pdf_path != enhanced_pdf_path:
-            os.remove(compressed_pdf_path)
         pdf_processor.cleanup_temp_files(data.get('temp_dir'))
 
     except Exception as e:
