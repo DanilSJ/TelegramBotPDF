@@ -38,40 +38,9 @@ class PDFProcessor:
         temp_dir = tempfile.mkdtemp()
         output_path = os.path.join(temp_dir, f"compressed_{method}.pdf")
 
-        # Настройки для разных методов сжатия
-        settings = {
-            "light": {
-                "gs_settings": "/prepress",  # Минимальное сжатие
-                "image_quality": 90,
-                "image_dpi": 150,
-                "aggressive": False
-            },
-            "balanced": {
-                "gs_settings": "/ebook",  # Баланс качество/размер
-                "image_quality": 75,
-                "image_dpi": 150,
-                "aggressive": True
-            },
-            "aggressive": {
-                "gs_settings": "/screen",  # Максимальное сжатие
-                "image_quality": 60,
-                "image_dpi": 96,
-                "aggressive": True
-            },
-            "extreme": {
-                "gs_settings": "/screen",  # Экстремальное сжатие
-                "image_quality": 40,
-                "image_dpi": 72,
-                "aggressive": True,
-                "extreme": True
-            }
-        }
-
-        method_settings = settings.get(method, settings["balanced"])
-
         try:
             return await self._compress_with_ghostscript(
-                pdf_path, output_path, method_settings
+                pdf_path, output_path
             )
 
 
@@ -103,9 +72,6 @@ class PDFProcessor:
         doc.close()
 
     async def _compress_with_ghostscript(self, pdf_path: str, output_path: str, settings: dict) -> str:
-
-        dpi = settings["image_dpi"]
-        quality = settings["image_quality"]
         gs = "gswin64c" if os.name == "nt" else "gs"
         command = [
             gs,
@@ -1007,36 +973,20 @@ class PDFProcessor:
         compressed_path = await self.compress_pdf_with_settings(pdf_path, user_id)
         compressed_size = os.path.getsize(compressed_path)
 
-        # Если сжатый файл МЕНЬШЕ оригинала - возвращаем его
-        if compressed_size < original_size:
-            return compressed_path
+        try:
+            test_path = await self._compress_pdf_with_method(pdf_path)
+            test_size = os.path.getsize(test_path)
 
-        # Если сжатый файл БОЛЬШЕ оригинала:
+            os.remove(test_path)
 
-        # 1. Пробуем разные методы сжатия
-        methods = ["light", "balanced", "aggressive"]
+        except:
+            pass
 
-        for method in methods:
-            try:
-                test_path = await self._compress_pdf_with_method(pdf_path, method)
-                test_size = os.path.getsize(test_path)
 
-                if test_size < original_size:
-
-                    if os.path.exists(compressed_path):
-                        os.remove(compressed_path)
-                    return test_path
-
-                # Удаляем тестовый файл если он не лучше
-                os.remove(test_path)
-
-            except:
-                continue
-
-        # 2. Если ничего не помогло, возвращаем оригинал
 
         if os.path.exists(compressed_path) and compressed_path != pdf_path:
             os.remove(compressed_path)
+
         return pdf_path
 
     def get_enhancement_presets(self) -> Dict[str, Dict]:
