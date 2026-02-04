@@ -70,16 +70,10 @@ class PDFProcessor:
         method_settings = settings.get(method, settings["balanced"])
 
         try:
-            # Пробуем через Ghostscript с оптимизированными параметрами
-            if await self._has_ghostscript():
-                return await self._compress_with_ghostscript(
-                    pdf_path, output_path, method_settings
-                )
-            else:
-                # Альтернативный метод без Ghostscript
-                return await self._compress_with_fitz(
-                    pdf_path, output_path, method_settings
-                )
+            return await self._compress_with_ghostscript(
+                pdf_path, output_path, method_settings
+            )
+
 
         except Exception as e:
             print(f"Error in compression method {method}: {e}")
@@ -112,44 +106,35 @@ class PDFProcessor:
 
         dpi = settings["image_dpi"]
         quality = settings["image_quality"]
-
+        gs = "gswin64c" if os.name == "nt" else "gs"
         command = [
-            "gs",
+            gs,
             "-sDEVICE=pdfwrite",
             "-dCompatibilityLevel=1.4",
             "-dNOPAUSE",
             "-dBATCH",
-            "-dQUIET",
+            "-dSAFER",
 
-            # ВАЖНО
+            # Экстремальное сжатие
+            "-dPDFSETTINGS=/screen",
             "-dDetectDuplicateImages=true",
             "-dCompressFonts=true",
             "-dSubsetFonts=true",
-
-            # RECOMPRESS images
             "-dDownsampleColorImages=true",
-            f"-dColorImageResolution={dpi}",
-            "-dColorImageDownsampleType=/Bicubic",
-
             "-dDownsampleGrayImages=true",
-            f"-dGrayImageResolution={dpi}",
-
             "-dDownsampleMonoImages=true",
-            f"-dMonoImageResolution={dpi}",
-
-            # FORCE JPEG
+            "-dColorImageResolution=72",
+            "-dGrayImageResolution=72",
+            "-dMonoImageResolution=72",
+            "-dColorImageDownsampleType=/Bicubic",
+            "-dGrayImageDownsampleType=/Bicubic",
             "-dAutoFilterColorImages=false",
             "-dAutoFilterGrayImages=false",
             "-dColorImageFilter=/DCTEncode",
             "-dGrayImageFilter=/DCTEncode",
-
-            # THIS IS CRITICAL
-            f"-dJPEGQ={quality}",
-            "-dFastWebView=true",
-            # remove junk
-            "-dDiscardCachedFonts=true",
-            "-dCompressPages=true",
-            "-dUseFlateCompression=true",
+            "-dJPEGQ=30",
+            "-dStripICCProfiles=true",
+            "-dFastWebView=false",
 
             f"-sOutputFile={output_path}",
             pdf_path
