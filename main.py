@@ -461,44 +461,70 @@ async def process_compress(callback: CallbackQuery, state: FSMContext):
 
 @dp.callback_query(F.data == "apply_contrast")
 async def apply_contrast(callback: CallbackQuery, state: FSMContext):
-    """Применение настроек контраста/яркости к PDF с последующим сжатием"""
     await callback.answer()
 
     data = await state.get_data()
     input_pdf_path = data.get('input_pdf_path')
     original_name = data.get('original_file_name', 'document.pdf')
-    file_base_name = data.get('file_base_name', Path(original_name).stem)
 
     try:
-        progress_msg = await callback.message.edit_text("🎨 Применяю настройки контраста и яркости...")
-
-        # Применяем настройки контраста и яркости
-        enhanced_pdf_path = await pdf_processor.adjust_contrast_brightness(
-            input_pdf_path,
-            callback.from_user.id,
-            original_name  # Передаем оригинальное имя
+        progress_msg = await callback.message.edit_text(
+            "🎨 Улучшаю PDF (DPI + контраст + яркость)..."
         )
 
+        # получаем настройки
+        user_settings = pdf_processor.get_user_settings(callback.from_user.id)
 
-        # Отправляем сжатый файл с оригинальным именем
-        compressed_file = FSInputFile(
+        dpi = user_settings.get('dpi', 300)
+        contrast = user_settings.get('contrast', 1.15)
+        brightness = user_settings.get('brightness', 0)
+
+        # 1️⃣ Улучшаем PDF
+        enhanced_pdf_path = await pdf_processor.adjust_contrast_brightness(
+            input_pdf_path=input_pdf_path,
+            dpi=dpi,
+            contrast=contrast,
+            brightness=brightness,
+            original_name=original_name
+        )
+
+        await progress_msg.edit_text("📦 Сжимаю улучшенный PDF...")
+
+        # 2️⃣ СЖИМАЕМ уже улучшенный файл
+        compressed_path = await pdf_processor.compress_pdf_with_enhancement(
             enhanced_pdf_path,
-            filename=original_name  # Отправляем с оригинальным именем
+            callback.from_user.id
+        )
+
+        final_path = compressed_path if compressed_path else enhanced_pdf_path
+
+        final_file = FSInputFile(
+            final_path,
+            filename=original_name
         )
 
         await callback.message.answer_document(
-            compressed_file,
-            caption=f"✅ PDF файл обработан с настройками контраста и яркости",
-            parse_mode="HTML"
+            final_file,
+            caption=(
+                "✅ PDF улучшен и сжат\n\n"
+                f"🎯 DPI: {dpi}\n"
+                f"🌓 Контраст: {contrast}\n"
+                f"☀️ Яркость: {brightness}"
+            )
         )
 
-        # Очищаем временные файлы
-        if os.path.exists(enhanced_pdf_path) and enhanced_pdf_path != input_pdf_path:
+        # cleanup
+        if os.path.exists(enhanced_pdf_path):
             os.remove(enhanced_pdf_path)
+
+        if compressed_path and os.path.exists(compressed_path):
+            os.remove(compressed_path)
+
         pdf_processor.cleanup_temp_files(data.get('temp_dir'))
 
     except Exception as e:
-        pass
+        logger.exception(e)
+        await callback.message.answer("❌ Ошибка обработки")
 
 @dp.callback_query(F.data == "action_contrast")
 async def process_contrast(callback: CallbackQuery, state: FSMContext):
@@ -521,46 +547,6 @@ async def process_contrast(callback: CallbackQuery, state: FSMContext):
         parse_mode="HTML",
         reply_markup=get_contrast_apply_keyboard()
     )
-
-
-@dp.callback_query(F.data == "apply_contrast")
-async def apply_contrast(callback: CallbackQuery, state: FSMContext):
-    """Применение настроек контраста/яркости к PDF"""
-    await callback.answer()
-
-    data = await state.get_data()
-    input_pdf_path = data.get('input_pdf_path')
-    original_name = data.get('original_file_name', 'document.pdf')
-    file_base_name = data.get('file_base_name', Path(original_name).stem)
-
-    try:
-        progress_msg = await callback.message.edit_text("🎨 Применяю настройки контраста и яркости...")
-
-        # Применяем настройки контраста и яркости
-        enhanced_pdf_path = await pdf_processor.adjust_contrast_brightness(
-            input_pdf_path,
-            callback.from_user.id
-        )
-
-        # Отправляем обработанный файл с оригинальным именем
-        enhanced_file = FSInputFile(
-            enhanced_pdf_path,
-            filename=f"{file_base_name}_улучшенный.pdf"  # Используем оригинальное имя
-        )
-
-        await progress_msg.delete()
-        await callback.message.answer_document(
-            enhanced_file,
-            caption="✅ PDF файл обработан с настройками контраста и яркости"
-        )
-
-        # Очищаем временные файлы
-        if os.path.exists(enhanced_pdf_path):
-            os.remove(enhanced_pdf_path)
-        pdf_processor.cleanup_temp_files(data.get('temp_dir'))
-
-    except Exception as e:
-        pass
 
 @dp.callback_query(F.data == "action_settings")
 async def process_settings(callback: CallbackQuery):

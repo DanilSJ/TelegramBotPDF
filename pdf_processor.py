@@ -98,131 +98,97 @@ class PDFProcessor:
         except:
             return False
 
+    def _final_optimize(self, path):
+        doc = fitz.open(path)
+        doc.save(
+            path,
+            garbage=4,
+            deflate=True,
+            clean=True
+        )
+        doc.close()
+
     async def _compress_with_ghostscript(self, pdf_path: str, output_path: str, settings: dict) -> str:
-        """Сжатие через Ghostscript с БЕЗОПАСНЫМИ параметрами"""
-        gs_settings = settings["gs_settings"]
-        image_quality = settings["image_quality"]
-        image_dpi = settings["image_dpi"]
 
-        # БАЗОВАЯ команда Ghostscript - БЕЗ опасных преобразований цвета
+        dpi = settings["image_dpi"]
+        quality = settings["image_quality"]
+
         command = [
-            'gs',
-            '-sDEVICE=pdfwrite',
-            '-dCompatibilityLevel=1.4',
-            f'-dPDFSETTINGS={gs_settings}',
-            '-dNOPAUSE',
-            '-dQUIET',
-            '-dBATCH',
+            "gs",
+            "-sDEVICE=pdfwrite",
+            "-dCompatibilityLevel=1.4",
+            "-dNOPAUSE",
+            "-dBATCH",
+            "-dQUIET",
 
-            # БЕЗОПАСНЫЕ настройки для изображений
-            '-dDownsampleColorImages=true',
-            f'-dColorImageResolution={image_dpi}',
-            '-dColorImageDownsampleType=/Bicubic',
+            # ВАЖНО
+            "-dDetectDuplicateImages=true",
+            "-dCompressFonts=true",
+            "-dSubsetFonts=true",
 
-            '-dDownsampleGrayImages=true',
-            f'-dGrayImageResolution={image_dpi}',
-            '-dGrayImageDownsampleType=/Bicubic',
+            # RECOMPRESS images
+            "-dDownsampleColorImages=true",
+            f"-dColorImageResolution={dpi}",
+            "-dColorImageDownsampleType=/Bicubic",
 
-            '-dDownsampleMonoImages=true',
-            f'-dMonoImageResolution={image_dpi}',
-            '-dMonoImageDownsampleType=/Subsample',
+            "-dDownsampleGrayImages=true",
+            f"-dGrayImageResolution={dpi}",
 
-            # Качество JPEG
-            f'-dColorImageFilter=/DCTEncode',
-            f'-dGrayImageFilter=/DCTEncode',
-            f'-dColorConversionStrategy=/LeaveColorUnchanged',  # ВАЖНО: не менять цвета
-            f'-dEncodeColorImages=true',
-            f'-dEncodeGrayImages=true',
-            f'-dEncodeMonoImages=true',
-            f'-dAutoFilterColorImages=false',
-            f'-dAutoFilterGrayImages=false',
+            "-dDownsampleMonoImages=true",
+            f"-dMonoImageResolution={dpi}",
 
-            # Настройки сжатия
-            '-dCompressFonts=true',
-            '-dEmbedAllFonts=true',
-            '-dSubsetFonts=true',
-            '-dCompressPages=true',
-            '-dUseFlateCompression=true',
+            # FORCE JPEG
+            "-dAutoFilterColorImages=false",
+            "-dAutoFilterGrayImages=false",
+            "-dColorImageFilter=/DCTEncode",
+            "-dGrayImageFilter=/DCTEncode",
 
-            # Качество JPEG
-            f'-dColorImageQuality={image_quality}',
-            f'-dGrayImageQuality={image_quality}',
+            # THIS IS CRITICAL
+            f"-dJPEGQ={quality}",
+            "-dFastWebView=true",
+            # remove junk
+            "-dDiscardCachedFonts=true",
+            "-dCompressPages=true",
+            "-dUseFlateCompression=true",
 
-            # ВАЖНО: отключаем преобразование в градации серого
-            '-dProcessColorModel=/DeviceRGB',
-
-            f'-sOutputFile={output_path}',
+            f"-sOutputFile={output_path}",
             pdf_path
         ]
 
-        # УДАЛЕНО: экстремальные параметры
-        # НЕ добавляем параметры для экстремального сжатия
-        # которые могут конвертировать в черно-белое
+        proc = await asyncio.create_subprocess_exec(*command)
+        await proc.communicate()
 
-        process = await asyncio.create_subprocess_exec(
-            *command,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE
-        )
+        if not os.path.exists(output_path):
+            raise Exception("Ghostscript failed")
 
-        stdout, stderr = await process.communicate()
+        return output_path
 
-        if process.returncode == 0 and os.path.exists(output_path):
-            return output_path
-        else:
-            raise Exception(f"Ghostscript failed: {stderr.decode()}")
+    async def _compress_with_fitz(self, pdf_path, output_path, settings):
 
-    async def _compress_with_fitz(self, pdf_path: str, output_path: str, settings: dict) -> str:
-        """Альтернативный метод сжатия через PyMuPDF"""
-        temp_dir = tempfile.mkdtemp()
+        dpi = settings["image_dpi"]
+        quality = settings["image_quality"]
 
-        try:
-            doc = fitz.open(pdf_path)
-            new_doc = fitz.open()
+        doc = fitz.open(pdf_path)
+        new = fitz.open()
 
-            # Получаем настройки
-            image_quality = settings["image_quality"]
-            image_dpi = settings["image_dpi"]
-            aggressive = settings.get("aggressive", True)
+        zoom = dpi / 72
 
-            for page_num in range(len(doc)):
-                page = doc.load_page(page_num)
-                new_page = new_doc.new_page(
-                    width=page.rect.width,
-                    height=page.rect.height
-                )
+        for p in doc:
+            pix = p.get_pixmap(matrix=fitz.Matrix(zoom, zoom), alpha=False)
 
-                # Копируем страницу с оптимизацией
-                new_page.show_pdf_page(
-                    page.rect,
-                    doc,
-                    page_num
-                )
+            img = Image.frombytes("RGB", [pix.width, pix.height], pix.samples)
 
-            # Опции сохранения для максимального сжатия
-            save_options = {
-                'garbage': 4,  # Удаление неиспользуемых объектов
-                'deflate': True,  # Сжатие потоков
-                'deflate_images': aggressive,  # Сжатие изображений
-                'deflate_fonts': aggressive,  # Сжатие шрифтов
-                'clean': True,  # Очистка
-                'pretty': False,  # Без форматирования
-            }
+            buf = io.BytesIO()
+            img.save(buf, "JPEG", quality=quality, optimize=True)
 
-            # Дополнительная оптимизация изображений
-            if aggressive:
-                save_options['images'] = image_dpi
-                # Можно добавить дополнительную обработку изображений
-                await self._optimize_images_in_pdf(new_doc, image_quality, image_dpi)
+            page = new.new_page(width=pix.width, height=pix.height)
+            page.insert_image(page.rect, stream=buf.getvalue())
 
-            new_doc.save(output_path, **save_options)
-            new_doc.close()
-            doc.close()
+        new.save(output_path, garbage=4, deflate=True)
+        doc.close()
+        new.close()
 
-            return output_path
-
-        except Exception as e:
-            raise Exception(f"PyMuPDF compression failed: {e}")
+        return output_path
 
     async def _optimize_images_in_pdf(self, doc, quality: int, dpi: int):
         """Оптимизация изображений внутри PDF документа"""
@@ -882,22 +848,20 @@ class PDFProcessor:
 
     async def adjust_contrast_brightness(
             self,
-            pdf_path: str,
-            user_id: int,
+            input_pdf_path: str,
+            dpi: int,
+            contrast: float,
+            brightness: int,
             original_name: str = None
     ) -> str:
-        """Настройка контраста и яркости PDF (быстрая версия без img2pdf)"""
-
-        user_settings = self.get_user_settings(user_id)
-        contrast = user_settings.get("contrast", 1.15)
-        brightness = user_settings.get("brightness", 0)
+        """Настройка DPI + контраста + яркости"""
 
         temp_dir = tempfile.mkdtemp()
 
         if original_name:
             output_pdf_name = original_name
         else:
-            base = os.path.basename(pdf_path)
+            base = os.path.basename(input_pdf_path)
             name = os.path.splitext(base)[0]
             output_pdf_name = f"{name}_enhanced.pdf"
 
@@ -907,23 +871,21 @@ class PDFProcessor:
         new_doc = None
 
         try:
-            doc = fitz.open(pdf_path)
+            doc = fitz.open(input_pdf_path)
             new_doc = fitz.open()
 
-            dpi = 150
+            # ✅ РЕАЛЬНЫЙ DPI пользователя
             zoom = dpi / 72
             mat = fitz.Matrix(zoom, zoom)
 
             for page_num in range(len(doc)):
                 page = doc.load_page(page_num)
 
-                # Рендер страницы → JPEG (НЕ PNG)
                 pix = page.get_pixmap(matrix=mat, alpha=False)
 
                 img_path = os.path.join(temp_dir, f"page_{page_num}.jpg")
                 pix.save(img_path, output="jpg")
 
-                # Применяем твои OpenCV настройки
                 enhanced_img_path = await self.enhance_image_with_settings(
                     img_path,
                     contrast=contrast,
@@ -932,19 +894,16 @@ class PDFProcessor:
                     auto_enhance=True
                 )
 
-                # Вставляем обратно в PDF потоково
                 rect = fitz.Rect(0, 0, pix.width, pix.height)
                 new_page = new_doc.new_page(width=rect.width, height=rect.height)
                 new_page.insert_image(rect, filename=enhanced_img_path)
 
-                # Чистим за собой
                 if os.path.exists(img_path):
                     os.remove(img_path)
 
                 if os.path.exists(enhanced_img_path):
                     os.remove(enhanced_img_path)
 
-            # Сохраняем финальный PDF
             new_doc.save(
                 output_pdf_path,
                 garbage=4,
@@ -957,16 +916,13 @@ class PDFProcessor:
         except Exception:
             import traceback
             traceback.print_exc()
-            return pdf_path
+            return input_pdf_path
 
         finally:
-            try:
-                if doc:
-                    doc.close()
-                if new_doc:
-                    new_doc.close()
-            except:
-                pass
+            if doc:
+                doc.close()
+            if new_doc:
+                new_doc.close()
 
     def _optimize_pdf_size(self, pdf_path: str):
         """Оптимизация размера PDF файла"""
