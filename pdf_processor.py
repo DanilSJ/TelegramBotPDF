@@ -578,48 +578,94 @@ class PDFProcessor:
 
         return images
 
-    async def compress_pdf(self, pdf_path: str, method: str = "aggressive") -> str:
-        """
-        Сжатие PDF файла с различными методами
+    async def compress_pdf(self, pdf_path: str) -> str:
+        temp_dir = tempfile.mkdtemp()
+        gs_out = os.path.join(temp_dir, "gs.pdf")
+        final_out = os.path.join(temp_dir, "final.pdf")
 
-        Args:
-            pdf_path: путь к исходному PDF файлу
-            method: метод сжатия ("aggressive", "balanced", "light")
+        try:
+            await self._nuke_with_ghostscript(pdf_path, gs_out)
 
-        Returns:
-            Путь к сжатому PDF файлу
-        """
-        # Сначала получаем информацию о файле
-        original_size = os.path.getsize(pdf_path)
+            # если GS не дал эффекта — brutal rebuild
+            if os.path.getsize(gs_out) >= os.path.getsize(pdf_path):
+                await self._brutal_rebuild(pdf_path, final_out)
+                return final_out
 
-        # Пробуем несколько методов, пока не получим хорошее сжатие
-        methods_to_try = ["aggressive", "balanced", "light", "extreme"]
+            return gs_out
 
-        for compress_method in methods_to_try:
-            try:
-                output_path = await self._compress_pdf_with_method(
-                    pdf_path,
-                    compress_method
-                )
+        except:
+            await self._brutal_rebuild(pdf_path, final_out)
+            return final_out
 
-                if output_path and os.path.exists(output_path):
-                    compressed_size = os.path.getsize(output_path)
-                    compression_ratio = compressed_size / original_size
+    async def _nuke_with_ghostscript(self, input_pdf, output_pdf):
 
-                    # Если сжатие более 10% или это последний метод
-                    if compression_ratio < 0.9 or compress_method == methods_to_try[-1]:
+        cmd = [
+            "gs",
+            "-sDEVICE=pdfwrite",
+            "-dCompatibilityLevel=1.4",
+            "-dNOPAUSE",
+            "-dBATCH",
+            "-dSAFER",
 
-                        return output_path
-                    else:
-                        # Удаляем плохо сжатый файл и пробуем следующий метод
-                        os.remove(output_path)
+            "-dPDFSETTINGS=/screen",
 
-            except Exception as e:
+            "-dDetectDuplicateImages=true",
+            "-dCompressFonts=true",
+            "-dSubsetFonts=true",
+            "-dEmbedAllFonts=true",
 
-                continue
+            "-dDownsampleColorImages=true",
+            "-dDownsampleGrayImages=true",
+            "-dDownsampleMonoImages=true",
 
-        # Если все методы не сработали, возвращаем исходный файл
-        return pdf_path
+            "-dColorImageResolution=120",
+            "-dGrayImageResolution=120",
+            "-dMonoImageResolution=120",
+
+            "-dColorImageDownsampleType=/Bicubic",
+            "-dGrayImageDownsampleType=/Bicubic",
+
+            "-dAutoFilterColorImages=false",
+            "-dAutoFilterGrayImages=false",
+
+            "-dColorImageFilter=/DCTEncode",
+            "-dGrayImageFilter=/DCTEncode",
+
+            "-dJPEGQ=40",
+
+            "-dStripICCProfiles=true",
+            "-dFastWebView=true",
+            "-dDiscardCachedFonts=true",
+
+            "-sOutputFile=" + output_pdf,
+            input_pdf
+        ]
+
+        p = await asyncio.create_subprocess_exec(*cmd)
+        await p.communicate()
+
+        if not os.path.exists(output_pdf):
+            raise Exception("GS failed")
+
+    async def _brutal_rebuild(self, pdf_path, output_path):
+
+        doc = fitz.open(pdf_path)
+        new = fitz.open()
+
+        for page in doc:
+            pix = page.get_pixmap(matrix=fitz.Matrix(1.3, 1.3), alpha=False)
+
+            img = Image.frombytes("RGB", [pix.width, pix.height], pix.samples)
+
+            buf = io.BytesIO()
+            img.save(buf, "JPEG", quality=35, optimize=True)
+
+            p = new.new_page(width=pix.width, height=pix.height)
+            p.insert_image(p.rect, stream=buf.getvalue())
+
+        new.save(output_path, garbage=4, deflate=True)
+        doc.close()
+        new.close()
 
     async def smart_compress_pdf(self, pdf_path: str) -> str:
         """
@@ -651,7 +697,7 @@ class PDFProcessor:
         print(f"Selected compression method: {method}")
 
         # Выполняем сжатие
-        return await self.compress_pdf(pdf_path, method)
+        return await self.compress_pdf(pdf_path)
 
 
     def cleanup_temp_files(self, temp_dir: str):
