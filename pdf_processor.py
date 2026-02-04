@@ -260,10 +260,6 @@ class PDFProcessor:
             # OpenCV читает BGR — переводим в RGB если надо
             img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
 
-            # AUTO ENHANCE (простая нормализация)
-            if auto_enhance:
-                img = cv2.normalize(img, None, 0, 255, cv2.NORM_MINMAX)
-
             # === ЯРКОСТЬ + КОНТРАСТ ===
             # contrast = alpha
             # brightness = beta
@@ -276,7 +272,7 @@ class PDFProcessor:
             # обратно в BGR для сохранения
             img = cv2.cvtColor(img, cv2.COLOR_RGB2BGR)
 
-            output_path = image_path.replace(".png", "_enhanced.jpg")
+            output_path = image_path.replace(".jpg", "_enhanced.jpg")
 
             cv2.imwrite(
                 output_path,
@@ -440,8 +436,8 @@ class PDFProcessor:
                 pix = page.get_pixmap(matrix=mat)
 
                 # Используем имя PDF файла в названии изображения
-                img_path = os.path.join(temp_dir, f"{pdf_name}_page_{page_num + 1}.png")
-                pix.save(img_path)
+                img_path = os.path.join(temp_dir, f"{pdf_name}_page_{page_num + 1}.jpg")
+                pix.save(img_path, output="jpg")
 
                 # Оптимизируем размер для Telegram
                 self.optimize_image_size(img_path, max_file_size=1024 * 1024)
@@ -544,8 +540,8 @@ class PDFProcessor:
                 pix = page.get_pixmap(matrix=mat)
 
                 # Сохраняем временное изображение с именем исходного файла
-                temp_img_path = os.path.join(temp_dir, f"{pdf_name}_page_{page_num + 1}.png")
-                pix.save(temp_img_path)
+                temp_img_path = os.path.join(temp_dir, f"{pdf_name}_page_{page_num + 1}.jpg")
+                pix.save(temp_img_path, output="jpg")
 
                 # Применяем улучшения (яркость и контраст)
                 enhanced_img_path = await self.enhance_image_with_settings(
@@ -605,8 +601,8 @@ class PDFProcessor:
                 pix = page.get_pixmap(matrix=mat)
 
                 # Используем имя PDF файла в названии изображения
-                img_path = os.path.join(temp_dir, f"{pdf_name}_page_{page_num + 1}.png")
-                pix.save(img_path)
+                img_path = os.path.join(temp_dir, f"{pdf_name}_page_{page_num + 1}.jpg")
+                pix.save(img_path, output="jpg")
                 images.append(img_path)
 
             doc.close()
@@ -763,8 +759,8 @@ class PDFProcessor:
             pix = page.get_pixmap(matrix=mat)
 
             # Сохраняем временное изображение
-            preview_path = os.path.join(temp_dir, f"preview.png")
-            pix.save(preview_path)
+            preview_path = os.path.join(temp_dir, f"preview.jpg")
+            pix.save(preview_path, output="jpg")
             doc.close()
 
             # Применяем текущие настройки
@@ -884,79 +880,93 @@ class PDFProcessor:
         self.user_settings[user_id_str] = self.default_settings.copy()
         self.save_user_settings()
 
-    async def adjust_contrast_brightness(self, pdf_path: str, user_id: int, original_name: str = None) -> str:
-        """Настройка контраста и яркости PDF"""
-        user_settings = self.get_user_settings(user_id)
-        contrast = user_settings.get('contrast', 1.15)
-        brightness = user_settings.get('brightness', 0)
+    async def adjust_contrast_brightness(
+            self,
+            pdf_path: str,
+            user_id: int,
+            original_name: str = None
+    ) -> str:
+        """Настройка контраста и яркости PDF (быстрая версия без img2pdf)"""
 
+        user_settings = self.get_user_settings(user_id)
+        contrast = user_settings.get("contrast", 1.15)
+        brightness = user_settings.get("brightness", 0)
 
         temp_dir = tempfile.mkdtemp()
 
         if original_name:
             output_pdf_name = original_name
         else:
-            original_basename = os.path.basename(pdf_path)
-            name_without_ext = os.path.splitext(original_basename)[0]
-            output_pdf_name = f"{name_without_ext}_enhanced.pdf"
+            base = os.path.basename(pdf_path)
+            name = os.path.splitext(base)[0]
+            output_pdf_name = f"{name}_enhanced.pdf"
 
         output_pdf_path = os.path.join(temp_dir, output_pdf_name)
 
+        doc = None
+        new_doc = None
+
         try:
             doc = fitz.open(pdf_path)
-            processed_images = []
+            new_doc = fitz.open()
+
+            dpi = 150
+            zoom = dpi / 72
+            mat = fitz.Matrix(zoom, zoom)
 
             for page_num in range(len(doc)):
                 page = doc.load_page(page_num)
 
-                # Устанавливаем FIXED DPI для консистентности
-                # 150 DPI достаточно для большинства документов
-                dpi = 150
-                zoom = dpi / 72
-                mat = fitz.Matrix(zoom, zoom)
+                # Рендер страницы → JPEG (НЕ PNG)
+                pix = page.get_pixmap(matrix=mat, alpha=False)
 
-                # Рендерим страницу
-                pix = page.get_pixmap(matrix=mat, alpha=False)  # alpha=False для меньшего размера
+                img_path = os.path.join(temp_dir, f"page_{page_num}.jpg")
+                pix.save(img_path, output="jpg")
 
-                # Сохраняем временное изображение
-                img_path = os.path.join(temp_dir, f"page_{page_num}.png")
-                pix.save(img_path)
-
-                # ПРОСТОЙ вызов enhance_image_with_settings БЕЗ target_size_kb
+                # Применяем твои OpenCV настройки
                 enhanced_img_path = await self.enhance_image_with_settings(
                     img_path,
                     contrast=contrast,
                     brightness=brightness,
                     sharpness=1.0,
                     auto_enhance=True
-                    # НЕ передаем target_size_kb - пусть настройки применяются полноценно
                 )
 
-                processed_images.append(enhanced_img_path)
+                # Вставляем обратно в PDF потоково
+                rect = fitz.Rect(0, 0, pix.width, pix.height)
+                new_page = new_doc.new_page(width=rect.width, height=rect.height)
+                new_page.insert_image(rect, filename=enhanced_img_path)
 
-                # Удаляем временное изображение
+                # Чистим за собой
                 if os.path.exists(img_path):
                     os.remove(img_path)
 
-            doc.close()
+                if os.path.exists(enhanced_img_path):
+                    os.remove(enhanced_img_path)
 
-            # Конвертируем обратно в PDF
-            if processed_images:
-                with open(output_pdf_path, "wb") as f:
-                    f.write(img2pdf.convert(processed_images))
-
-            # Очищаем временные изображения
-            for img_path in processed_images:
-                if os.path.exists(img_path):
-                    os.remove(img_path)
+            # Сохраняем финальный PDF
+            new_doc.save(
+                output_pdf_path,
+                garbage=4,
+                deflate=True,
+                clean=True
+            )
 
             return output_pdf_path
 
-        except Exception as e:
-
+        except Exception:
             import traceback
             traceback.print_exc()
             return pdf_path
+
+        finally:
+            try:
+                if doc:
+                    doc.close()
+                if new_doc:
+                    new_doc.close()
+            except:
+                pass
 
     def _optimize_pdf_size(self, pdf_path: str):
         """Оптимизация размера PDF файла"""
