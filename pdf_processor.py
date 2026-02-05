@@ -161,40 +161,62 @@ class PDFProcessor:
     async def enhance_image_with_settings(
             self,
             image_path: str,
-            contrast: float = 1.15,  # alpha
-            brightness: float = 0,  # beta
+            contrast: float = 1.15,  # коэффициент контраста
+            brightness: float = 10,  # смещение яркости
             sharpness: float = 1.0,
             auto_enhance: bool = True
     ) -> str:
+        """
+        Улучшение изображения с безопасным контрастом и яркостью
+        без превращения в черный.
 
+        Args:
+            image_path: путь к исходной картинке
+            contrast: коэффициент контраста (1.0 = без изменений)
+            brightness: смещение яркости в диапазоне [-100, 100]
+            sharpness: коэффициент резкости (1.0 = без изменений)
+            auto_enhance: применять автоконтраст
+
+        Returns:
+            Путь к улучшенной картинке
+        """
         try:
             # Загружаем через OpenCV
             img = cv2.imread(image_path)
-
             if img is None:
                 return image_path
 
-            # OpenCV читает BGR — переводим в RGB если надо
+            # BGR → RGB
             img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
 
-            # === ЯРКОСТЬ + КОНТРАСТ ===
-            # contrast = alpha
-            # brightness = beta
-            img = cv2.convertScaleAbs(
-                img,
-                alpha=float(contrast),
-                beta=int(brightness)
-            )
+            # Переводим в float 0..1
+            img = img.astype(np.float32) / 255.0
 
-            # обратно в BGR для сохранения
-            img = cv2.cvtColor(img, cv2.COLOR_RGB2BGR)
+            # Контраст: центрируем на 0.5
+            img = (img - 0.5) * contrast + 0.5
 
+            # Яркость: добавляем смещение
+            img += brightness / 255.0
+
+            # Ограничиваем 0..1
+            img = np.clip(img, 0, 1)
+
+            # Перевод обратно в uint8
+            img = (img * 255).astype(np.uint8)
+
+            # Конвертируем обратно в PIL для резкости и автоконтраста
+            pil_img = Image.fromarray(img)
+
+            if auto_enhance:
+                pil_img = ImageOps.autocontrast(pil_img, cutoff=2)
+
+            if sharpness != 1.0:
+                enhancer = ImageEnhance.Sharpness(pil_img)
+                pil_img = enhancer.enhance(sharpness)
+
+            # Сохраняем улучшенное изображение
             output_path = image_path.replace(".jpg", "_enhanced.jpg")
-
-            cv2.imwrite(
-                output_path,
-                img,
-            )
+            pil_img.save(output_path, "JPEG", quality=75, optimize=True)
 
             return output_path
 
