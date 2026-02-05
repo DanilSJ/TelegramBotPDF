@@ -611,21 +611,6 @@ class PDFProcessor:
         analysis = await self.analyze_pdf_structure(pdf_path)
         original_size = analysis.get("file_size", os.path.getsize(pdf_path))
 
-        # Выбираем метод на основе анализа
-        if analysis.get("has_images", False):
-            if original_size > 50 * 1024 * 1024:  # Более 50MB
-                method = "extreme"
-            elif original_size > 10 * 1024 * 1024:  # Более 10MB
-                method = "aggressive"
-            else:
-                method = "balanced"
-        elif analysis.get("has_text", False) and not analysis.get("has_images", False):
-            method = "light"  # Только текст - легкое сжатие
-        else:
-            method = "balanced"  # По умолчанию
-
-        print(f"Selected compression method: {method}")
-
         # Выполняем сжатие
         return await self.compress_pdf(pdf_path)
 
