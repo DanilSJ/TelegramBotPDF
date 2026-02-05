@@ -531,22 +531,11 @@ class PDFProcessor:
 
     async def compress_pdf(self, pdf_path: str) -> str:
         temp_dir = tempfile.mkdtemp()
-        gs_out = os.path.join(temp_dir, "gs.pdf")
-        final_out = os.path.join(temp_dir, "final.pdf")
+        output = os.path.join(temp_dir, "brutal.pdf")
 
-        try:
-            await self._nuke_with_ghostscript(pdf_path, gs_out)
+        await self._brutal_rebuild(pdf_path, output)
 
-            # если GS не дал эффекта — brutal rebuild
-            if os.path.getsize(gs_out) >= os.path.getsize(pdf_path):
-                await self._brutal_rebuild(pdf_path, final_out)
-                return final_out
-
-            return gs_out
-
-        except:
-            await self._brutal_rebuild(pdf_path, final_out)
-            return final_out
+        return output
 
     async def _nuke_with_ghostscript(self, input_pdf, output_pdf):
 
@@ -846,80 +835,57 @@ class PDFProcessor:
     async def adjust_contrast_brightness(
             self,
             input_pdf_path: str,
-            dpi: int,
-            contrast: float,
-            brightness: int,
-            original_name: str = None
-    ) -> str:
-        """Настройка DPI + контраста + яркости"""
+            dpi: int = 150,
+            contrast: float = 1.0,
+            brightness: float = 1.0,
+            original_name: str = "output.pdf"
+    ):
 
-        temp_dir = tempfile.mkdtemp()
+        # Force brutal always
+        dpi = min(dpi, 150)
+        zoom = dpi / 72
 
-        if original_name:
-            output_pdf_name = original_name
-        else:
-            base = os.path.basename(input_pdf_path)
-            name = os.path.splitext(base)[0]
-            output_pdf_name = f"{name}_enhanced.pdf"
+        doc = fitz.open(input_pdf_path)
+        new_doc = fitz.open()
 
-        output_pdf_path = os.path.join(temp_dir, output_pdf_name)
+        for page in doc:
 
-        doc = None
-        new_doc = None
-
-        try:
-            doc = fitz.open(input_pdf_path)
-            new_doc = fitz.open()
-
-            # ✅ РЕАЛЬНЫЙ DPI пользователя
-            zoom = dpi / 72
-            mat = fitz.Matrix(zoom, zoom)
-
-            for page_num in range(len(doc)):
-                page = doc.load_page(page_num)
-
-                pix = page.get_pixmap(matrix=mat, alpha=False)
-
-                img_path = os.path.join(temp_dir, f"page_{page_num}.jpg")
-                pix.save(img_path, output="jpg")
-
-                enhanced_img_path = await self.enhance_image_with_settings(
-                    img_path,
-                    contrast=contrast,
-                    brightness=brightness,
-                    sharpness=1.0,
-                    auto_enhance=True
-                )
-
-                rect = fitz.Rect(0, 0, pix.width, pix.height)
-                new_page = new_doc.new_page(width=rect.width, height=rect.height)
-                new_page.insert_image(rect, filename=enhanced_img_path)
-
-                if os.path.exists(img_path):
-                    os.remove(img_path)
-
-                if os.path.exists(enhanced_img_path):
-                    os.remove(enhanced_img_path)
-
-            new_doc.save(
-                output_pdf_path,
-                garbage=4,
-                deflate=True,
-                clean=True
+            pix = page.get_pixmap(
+                matrix=fitz.Matrix(zoom, zoom),
+                alpha=False
             )
 
-            return output_pdf_path
+            img = Image.frombytes("RGB", [pix.width, pix.height], pix.samples)
 
-        except Exception:
-            import traceback
-            traceback.print_exc()
-            return input_pdf_path
+            # Apply enhancements
+            if contrast != 1.0:
+                img = ImageEnhance.Contrast(img).enhance(contrast)
 
-        finally:
-            if doc:
-                doc.close()
-            if new_doc:
-                new_doc.close()
+            if brightness != 1.0:
+                img = ImageEnhance.Brightness(img).enhance(brightness)
+
+            buf = io.BytesIO()
+
+            img.save(
+                buf,
+                "JPEG",
+                quality=25,
+                subsampling=2,
+                optimize=True
+            )
+
+            p = new_doc.new_page(width=pix.width, height=pix.height)
+            p.insert_image(p.rect, stream=buf.getvalue())
+
+        temp_dir = tempfile.mkdtemp()
+        out_path = os.path.join(temp_dir, original_name)
+
+        new_doc.save(out_path, garbage=4, deflate=True)
+
+        doc.close()
+        new_doc.close()
+
+        return out_path
 
     def _optimize_pdf_size(self, pdf_path: str):
         """Оптимизация размера PDF файла"""

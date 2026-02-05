@@ -475,12 +475,11 @@ async def apply_contrast(callback: CallbackQuery, state: FSMContext):
         # получаем настройки
         user_settings = pdf_processor.get_user_settings(callback.from_user.id)
 
-        dpi = user_settings.get('dpi', 300)
+        dpi = min(user_settings.get('dpi', 300), 150)
         contrast = user_settings.get('contrast', 1.15)
         brightness = user_settings.get('brightness', 0)
 
-        # 1️⃣ Улучшаем PDF
-        enhanced_pdf_path = await pdf_processor.adjust_contrast_brightness(
+        final_path = await pdf_processor.adjust_contrast_brightness(
             input_pdf_path=input_pdf_path,
             dpi=dpi,
             contrast=contrast,
@@ -488,37 +487,13 @@ async def apply_contrast(callback: CallbackQuery, state: FSMContext):
             original_name=original_name
         )
 
-        await progress_msg.edit_text("📦 Сжимаю улучшенный PDF...")
-
-        # 2️⃣ СЖИМАЕМ уже улучшенный файл
-        compressed_path = await pdf_processor.compress_pdf_with_enhancement(
-            enhanced_pdf_path,
-            callback.from_user.id
-        )
-
-        final_path = compressed_path if compressed_path else enhanced_pdf_path
-
-        final_file = FSInputFile(
-            final_path,
-            filename=original_name
-        )
-
         await callback.message.answer_document(
-            final_file,
-            caption=(
-                "✅ PDF улучшен и сжат\n\n"
-                f"🎯 DPI: {dpi}\n"
-                f"🌓 Контраст: {contrast}\n"
-                f"☀️ Яркость: {brightness}"
-            )
+            FSInputFile(final_path, filename=original_name),
+            caption="✅ PDF обработан"
         )
-
         # cleanup
-        if os.path.exists(enhanced_pdf_path):
-            os.remove(enhanced_pdf_path)
-
-        if compressed_path and os.path.exists(compressed_path):
-            os.remove(compressed_path)
+        if os.path.exists(final_path):
+            os.remove(final_path)
 
         pdf_processor.cleanup_temp_files(data.get('temp_dir'))
 
