@@ -163,53 +163,51 @@ class PDFProcessor:
             image_path: str,
             contrast: float = 1.15,
             brightness: float = 0,
-            quality: int = 200,
+            quality: int = 90,
             dpi: int = 300
     ) -> str:
+        """
+        Улучшение изображения с учетом контраста и яркости.
+        Работает корректно даже на больших изображениях.
+        """
 
         try:
-            img = cv2.imread(image_path)
-            if img is None:
-                return image_path
+            from PIL import Image, ImageEnhance
 
-            img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+            # Открываем изображение через Pillow
+            img = Image.open(image_path)
+            if img.mode != 'RGB':
+                img = img.convert('RGB')
 
-            # === DPI scaling (НЕ трогаем пользовательские значения) ===
+            # === Применяем контраст ===
+            contrast = max(0.3, min(contrast, 10.0))
+            enhancer = ImageEnhance.Contrast(img)
+            img = enhancer.enhance(contrast)
 
-            user_contrast = contrast
-            user_brightness = brightness
+            # === Применяем яркость ===
+            brightness = max(-150, min(brightness, 150))
+            # Pillow Brightness принимает коэффициент >0, где 1.0 = без изменений
+            # Мы нормализуем яркость в диапазоне [-150,150] в коэффициент [0.0,3.0]
+            brightness_factor = 1.0 + (brightness / 100.0)
+            brightness_factor = max(0.0, min(brightness_factor, 3.0))
+            enhancer = ImageEnhance.Brightness(img)
+            img = enhancer.enhance(brightness_factor)
 
-            base_dpi = 300.0
-            dpi_factor = dpi / base_dpi
-
-            effective_contrast = float(user_contrast * dpi_factor)
-            effective_brightness = int(user_brightness * dpi_factor)
-
-            effective_contrast = max(0.3, min(effective_contrast, 8.0))
-            effective_brightness = max(-150, min(effective_brightness, 150))
-
-            img = img.astype(np.float32)
-
-            img = img * effective_contrast + effective_brightness
-
-            img = np.clip(img, 0, 255)
-
-            img = img.astype(np.uint8)
-
-            img = cv2.cvtColor(img, cv2.COLOR_RGB2BGR)
-
+            # === Сохраняем с высоким качеством, без агрессивного subsampling ===
             output_path = image_path.replace(".jpg", "_enhanced.jpg")
-
-            cv2.imwrite(
+            img.save(
                 output_path,
-                img,
-                [int(cv2.IMWRITE_JPEG_QUALITY), quality]
+                "JPEG",
+                quality=quality,
+                subsampling=0,
+                optimize=True
             )
 
+            img.close()
             return output_path
 
         except Exception as e:
-            print("OpenCV enhance error:", e)
+            print(f"Enhance error: {e}")
             return image_path
 
     def _apply_extreme_brightness(self, img: Image.Image, brightness: float) -> Image.Image:
