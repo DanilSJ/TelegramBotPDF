@@ -161,30 +161,50 @@ class PDFProcessor:
     async def enhance_image_with_settings(
             self,
             image_path: str,
-            contrast: float = 1.15,  # alpha
-            brightness: float = 0,  # beta
-            quality: int = 85  # качество JPEG (0-100)
+            contrast: float = 1.15,
+            brightness: float = 0,
+            quality: int = 200,
+            dpi: int = 300
     ) -> str:
+
         try:
-            # Загружаем
             img = cv2.imread(image_path)
             if img is None:
                 return image_path
 
-            # BGR → RGB
             img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
 
-            # Контраст + яркость
-            img = cv2.convertScaleAbs(img, alpha=float(contrast), beta=float(brightness))
+            # === DPI scaling (НЕ трогаем пользовательские значения) ===
 
-            # RGB → BGR для сохранения через OpenCV
+            user_contrast = contrast
+            user_brightness = brightness
+
+            base_dpi = 300.0
+            dpi_factor = dpi / base_dpi
+
+            effective_contrast = float(user_contrast * dpi_factor)
+            effective_brightness = int(user_brightness * dpi_factor)
+
+            effective_contrast = max(0.3, min(effective_contrast, 8.0))
+            effective_brightness = max(-150, min(effective_brightness, 150))
+
+            img = img.astype(np.float32)
+
+            img = img * effective_contrast + effective_brightness
+
+            img = np.clip(img, 0, 255)
+
+            img = img.astype(np.uint8)
+
             img = cv2.cvtColor(img, cv2.COLOR_RGB2BGR)
 
-            # Создаем новый путь
             output_path = image_path.replace(".jpg", "_enhanced.jpg")
 
-            # Сохраняем с контролем качества (уменьшает вес)
-            cv2.imwrite(output_path, img, [int(cv2.IMWRITE_JPEG_QUALITY), quality])
+            cv2.imwrite(
+                output_path,
+                img,
+                [int(cv2.IMWRITE_JPEG_QUALITY), quality]
+            )
 
             return output_path
 
@@ -455,8 +475,7 @@ class PDFProcessor:
                     temp_img_path,
                     contrast=contrast,
                     brightness=brightness,
-                    sharpness=1.0,  # Можно добавить в настройки если нужно
-                    auto_enhance=True
+                    dpi=dpi
                 )
 
                 # Оптимизируем размер для Telegram
@@ -695,8 +714,6 @@ class PDFProcessor:
                 preview_path,
                 contrast=contrast,
                 brightness=brightness,
-                sharpness=sharpness,
-                auto_enhance=True
             )
 
             # Информация о примененных настройках
@@ -817,7 +834,6 @@ class PDFProcessor:
     ):
 
         # Force brutal always
-        dpi = min(dpi, 150)
         zoom = dpi / 72
 
         doc = fitz.open(input_pdf_path)
@@ -844,7 +860,7 @@ class PDFProcessor:
             img.save(
                 buf,
                 "JPEG",
-                quality=25,
+                quality=60,
                 subsampling=2,
                 optimize=True
             )
