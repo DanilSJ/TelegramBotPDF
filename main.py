@@ -1,11 +1,13 @@
 import os
 import asyncio
 import logging
+
+from PIL import Image
 from aiogram import Bot, Dispatcher, types, F
 from aiogram.client.session.aiohttp import AiohttpSession
 from aiogram.client.telegram import TelegramAPIServer
 from aiogram.filters import Command
-from aiogram.types import Message, FSInputFile, CallbackQuery
+from aiogram.types import Message, FSInputFile, CallbackQuery, BufferedInputFile
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.fsm.storage.memory import MemoryStorage
@@ -280,70 +282,136 @@ async def process_images(callback: CallbackQuery, state: FSMContext):
         logger.error(f"Error processing images: {e}")
         await callback.message.edit_text(f"❌ Ошибка при обработке: {str(e)}")
 
-async def send_images_in_albums(message: Message, images: list, original_name: str):
-    """Отправка изображений альбомами по 10 штук"""
-    try:
-        # Получаем имя без расширения
-        name_without_ext = os.path.splitext(original_name)[0]
+def normalize_image(path: str):
+    from PIL import Image
 
-        # Разбиваем изображения на группы по 10 (максимум для медиагруппы в Telegram)
-        chunk_size = 10
-        for i in range(0, len(images), chunk_size):
-            chunk = images[i:i + chunk_size]
+    with Image.open(path) as img:
+        img = img.convert("RGB")
 
-            # Создаем медиагруппу
-            media_group = []
+        w, h = img.size
 
-            for j, image_path in enumerate(chunk, 1):
-                page_num = i + j
-                # Используем оригинальное имя файла
-                caption = f"📄 {name_without_ext} - страница {page_num}"
+        # Минимальный размер
+        if min(w, h) < 10:
+            raise ValueError("Image too small")
 
-                # Оптимизируем размер изображения для Telegram
-                pdf_processor.optimize_image_size(image_path, max_file_size=1024 * 1024)  # 1MB максимум
+        # Telegram limits
+        MAX_SIDE = 10000
+        MAX_RATIO = 20
 
-                with open(image_path, 'rb') as img_file:
-                    media_group.append(
-                        types.InputMediaPhoto(
-                            media=types.BufferedInputFile(
-                                img_file.read(),
-                                filename=f"{name_without_ext}_страница_{page_num}.jpg"
+        ratio = max(w / h, h / w)
+
+        # Fix insane aspect ratio (PDF bug)
+        if ratio > MAX_RATIO:
+            if h > w:
+                new_h = w * MAX_RATIO
+                img = img.crop((0, 0, w, int(new_h)))
+            else:
+                new_w = h * MAX_RATIO
+                img = img.crop((0, 0, int(new_w), h))
+
+            w, h = img.size
+
+        # Resize if too large
+        if max(w, h) > MAX_SIDE:
+            scale = MAX_SIDE / max(w, h)
+            img = img.resize(
+                (int(w * scale), int(h * scale)),
+                Image.LANCZOS
+            )
+
+        img.save(path, "JPEG", quality=92, optimize=True)
+
+
+# ---------------- SINGLE SEND FALLBACK ----------------
+
+async def send_images_one_by_one(message, images, name_without_ext):
+    for idx, path in enumerate(images, 1):
+        try:
+            normalize_image(path)
+
+            with open(path, "rb") as f:
+                await message.answer_photo(
+                    BufferedInputFile(
+                        f.read(),
+                        filename=f"{name_without_ext}_page_{idx}.jpg"
+                    )
+                )
+
+        except Exception as e:
+            logger.error(f"Photo failed {idx}, sending as document: {e}")
+
+            # Последний fallback — документ
+            with open(path, "rb") as f:
+                await message.answer_document(
+                    BufferedInputFile(
+                        f.read(),
+                        filename=f"{name_without_ext}_page_{idx}.jpg"
+                    )
+                )
+
+        await asyncio.sleep(0.3)
+
+
+# ---------------- MAIN FUNCTION ----------------
+
+async def send_images_in_albums(message, images: list, original_name: str):
+
+    logger = logging.getLogger(__name__)
+
+    name = os.path.splitext(original_name)[0]
+    chunk = 10
+
+    for i in range(0, len(images), chunk):
+        batch = images[i:i + chunk]
+        media = []
+
+        for j, path in enumerate(batch, 1):
+            page = i + j
+
+            with open(path, "rb") as f:
+                data = f.read()
+
+            media.append(
+                types.InputMediaPhoto(
+                    media=BufferedInputFile(
+                        data,
+                        filename=f"{name}_page_{page}.jpg"
+                    )
+                )
+            )
+
+        try:
+            # Пытаемся отправить альбом фотками
+            await message.answer_media_group(media)
+
+        except Exception as e:
+            # Проверяем именно эту ошибку
+            if "PHOTO_INVALID_DIMENSIONS" not in str(e):
+                raise
+
+            logger.warning("Photo album failed, retrying as documents")
+
+            # Повторяем ТУ ЖЕ группу как documents
+            doc_media = []
+
+            for j, path in enumerate(batch, 1):
+                page = i + j
+
+                with open(path, "rb") as f:
+                    doc_media.append(
+                        types.InputMediaDocument(
+                            media=BufferedInputFile(
+                                f.read(),
+                                filename=f"{name}_page_{page}.jpg"
                             )
                         )
                     )
 
-            # Отправляем альбом
-            await message.answer_media_group(media_group)
+            await message.answer_media_group(doc_media)
 
-            # Небольшая задержка между альбомами чтобы не превысить лимиты
-            if i + chunk_size < len(images):
-                await asyncio.sleep(1)
+        if i + chunk < len(images):
+            await asyncio.sleep(1)
 
-    except Exception as e:
-        logger.error(f"Error sending images: {e}")
-        # Пробуем отправить по одному если групповой отправка не работает
-        await send_images_one_by_one(message, images, name_without_ext)
-
-async def send_images_one_by_one(message: Message, images: list, file_base_name: str):
-    """Отправка изображений по одному (запасной вариант)"""
-    for i, image_path in enumerate(images, 1):
-        try:
-            pdf_processor.optimize_image_size(image_path, max_file_size=1024 * 1024)
-
-            with open(image_path, 'rb') as img_file:
-                await message.answer_photo(
-                    types.BufferedInputFile(
-                        img_file.read(),
-                        filename=f"{file_base_name}_страница_{i}.jpg"  # Используем оригинальное имя
-                    ),
-                    caption=f"📄 {file_base_name}"
-                )
-
-            await asyncio.sleep(0.5)  # Пауза между отправками
-
-        except Exception as e:
-            logger.error(f"Error sending image {i}: {e}")
-            continue
 # async def send_document_with_retry(message, file_bytes, filename, caption, max_retries=1):
 #     """Отправка документа с повторными попытками"""
 #     for attempt in range(max_retries):
