@@ -235,6 +235,44 @@ async def handle_pdf(message: Message, state: FSMContext):
         logger.error(f"Error processing PDF: {e}")
         await message.answer("❌ Произошла ошибка при обработке файла. Большой файл.")
 
+def resize_for_telegram(input_path: str) -> str:
+    """
+    Сжимает и изменяет размер изображения, чтобы оно подходило для отправки в альбоме Telegram.
+    Возвращает путь к уменьшенному файлу (JPEG).
+    """
+    from PIL import Image
+    import os
+
+    MAX_SIDE = 4096  # Telegram лимит по одной стороне для фото
+    MAX_RATIO = 20
+
+    base_name = os.path.splitext(os.path.basename(input_path))[0]
+    output_path = os.path.join(tempfile.gettempdir(), f"{base_name}_tg.jpg")
+
+    with Image.open(input_path) as img:
+        img = img.convert("RGB")
+        w, h = img.size
+        ratio = max(w / h, h / w)
+
+        # Коррекция "диких" пропорций
+        if ratio > MAX_RATIO:
+            if h > w:
+                new_h = int(w * MAX_RATIO)
+                img = img.crop((0, 0, w, new_h))
+            else:
+                new_w = int(h * MAX_RATIO)
+                img = img.crop((0, 0, new_w, h))
+            w, h = img.size
+
+        # Сжатие больших фото
+        if max(w, h) > MAX_SIDE:
+            scale = MAX_SIDE / max(w, h)
+            img = img.resize((int(w * scale), int(h * scale)), Image.LANCZOS)
+
+        img.save(output_path, "JPEG", quality=85, optimize=True)
+
+    return output_path
+
 
 @dp.callback_query(F.data == "action_images")
 async def process_images(callback: CallbackQuery, state: FSMContext):
@@ -355,9 +393,8 @@ async def send_images_one_by_one(message, images, name_without_ext):
 # ---------------- MAIN FUNCTION ----------------
 
 async def send_images_in_albums(message, images: list, original_name: str):
-
+    import logging
     logger = logging.getLogger(__name__)
-
     name = os.path.splitext(original_name)[0]
     chunk = 10
 
@@ -368,46 +405,35 @@ async def send_images_in_albums(message, images: list, original_name: str):
         for j, path in enumerate(batch, 1):
             page = i + j
 
-            with open(path, "rb") as f:
-                data = f.read()
-
-            media.append(
-                types.InputMediaPhoto(
-                    media=BufferedInputFile(
-                        data,
-                        filename=f"{name}_page_{page}.jpg"
+            try:
+                tg_path = resize_for_telegram(path)  # уменьшаем фото для Telegram
+                with open(tg_path, "rb") as f:
+                    data = f.read()
+                media.append(
+                    types.InputMediaPhoto(
+                        media=BufferedInputFile(data, filename=f"{name}_page_{page}.jpg")
                     )
                 )
-            )
-
-        try:
-            # Пытаемся отправить альбом фотками
-            await message.answer_media_group(media)
-
-        except Exception as e:
-            # Проверяем именно эту ошибку
-            if "PHOTO_INVALID_DIMENSIONS" not in str(e):
-                raise
-
-            logger.warning("Photo album failed, retrying as documents")
-
-            # Повторяем ТУ ЖЕ группу как documents
-            doc_media = []
-
-            for j, path in enumerate(batch, 1):
-                page = i + j
-
+            except Exception as e:
+                logger.warning(f"Photo {page} слишком большое или ошибка: {e}")
+                # fallback на документ
                 with open(path, "rb") as f:
-                    doc_media.append(
+                    media.append(
                         types.InputMediaDocument(
-                            media=BufferedInputFile(
-                                f.read(),
-                                filename=f"{name}_page_{page}.jpg"
-                            )
+                            media=BufferedInputFile(f.read(), filename=f"{name}_page_{page}.jpg")
                         )
                     )
 
-            await message.answer_media_group(doc_media)
+        try:
+            await message.answer_media_group(media)
+        except Exception as e:
+            logger.error(f"Альбом не отправился: {e}")
+            # Если альбом упал, отправляем по одному
+            for item in media:
+                if isinstance(item, types.InputMediaPhoto):
+                    await message.answer_photo(item.media)
+                else:
+                    await message.answer_document(item.media)
 
         if i + chunk < len(images):
             await asyncio.sleep(1)
