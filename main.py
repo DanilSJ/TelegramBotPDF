@@ -307,9 +307,8 @@ async def send_images_in_albums(message: Message, images: list, original_name: s
                         types.InputMediaPhoto(
                             media=types.BufferedInputFile(
                                 img_file.read(),
-                                filename=f"{name_without_ext}_страница_{page_num}.jpg"  # Используем оригинальное имя
-                            ),
-                            caption=caption if caption else None
+                                filename=f"{name_without_ext}_страница_{page_num}.jpg"
+                            )
                         )
                     )
 
