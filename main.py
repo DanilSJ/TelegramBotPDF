@@ -317,8 +317,7 @@ async def process_images(callback: CallbackQuery, state: FSMContext):
         pdf_processor.cleanup_temp_files(temp_dir)
 
     except Exception as e:
-        logger.error(f"Error processing images: {e}")
-        await callback.message.edit_text(f"❌ Ошибка при обработке: {str(e)}")
+        pass
 
 def normalize_image(path: str):
     from PIL import Image
@@ -591,8 +590,7 @@ async def apply_contrast(callback: CallbackQuery, state: FSMContext):
         pdf_processor.cleanup_temp_files(data.get('temp_dir'))
 
     except Exception as e:
-        logger.exception(e)
-        await callback.message.answer("❌ Ошибка обработки")
+        pass
 
 @dp.callback_query(F.data == "action_contrast")
 async def process_contrast(callback: CallbackQuery, state: FSMContext):
